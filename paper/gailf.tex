@@ -41,7 +41,7 @@ Model Free IRLF - Proposal
 }
 
 
-\author{Kyriacos Shiarlis$^{1}$, Jo\~ao Messias$^{1}$, and Shimon Whiteson$^{2}$% <-this % stops a space
+\author{Kyriacos Shiarlis$^{1}$, Shimon Whiteson$^{2}$% <-this % stops a space
 % \thanks{*This work was not supported by any organization}% <-this % stops a space
 \thanks{$^{1}$Informatics Institute, University of Amsterdam, The Netherlands,
          {\tt\small \{k.c.shiarlis,j.messias\}@uva.nl}}%
@@ -85,49 +85,51 @@ This is a proposal as to how the IRLF framework can be applied to newer model-fr
 \end{abstract}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Introduction}
-We will denote the expert policy as $\pi_E$ and the agent policy by $\pi_A$. We look for a cost function $c \in C$ that appoints a large cost to failed data from $\pi_F$ and low cost to data from $\pi_E$. 
+\section{IntroductionS}
+We will denote the expert policy as $\pi_E$ and the agent policy by $\pi_A$. We look for a cost function $c \in C$ that appoints low cost exclusively to data from $\pi_E$. 
 
 In the original IRL setting the optimisation problem can be broken down into two loss functions to be minimised.
 
-\[
+\begin{equation}
 \mathcal{L}_c = E_{\pi_E}[c(s,a)] - E_{\pi_A}[c(s,a)] \label{eq:LC}
-\]
+\end{equation}
 
-\[
-\mathcal{L}_{\pi} = -H(\pi_A) + E_{\pi_A}[c(s,a)] \label{eq:LP}
-\]
+
+\begin{equation}
+ \mathcal{L}_{\pi} = -H(\pi_A) + E_{\pi_A}[c(s,a)] \label{eq:LP}
+\end{equation}
+
 Where $H(\pi_A)$ is the causal entropy of the policy $\pi_A$ and promotes policies to be more flat. 
 The first minimisation is performed using gradient descent by taking the derivative of $\mathcal{L}_c$ with respect to $c$. The second is performed by planning or reinforcement learning (RL) on the underlying MDP. The first minimisation attempts to assign a large cost to state action pairs used by $\pi_A$ and low cost to the expert trajectories ($\pi_E$). The second minimisation tries to find the policy with the lowest possible cost. 
 
-In practice the two minimisations are never carried out in full for every iteration. Instead the problem is seen as reinforcement learning where the cost function is constantly changing (in the inner loop). In turn RL can be seen as an adaptive sampler that samples the lowest cost regions of c(s,a) and thus allows the gradient with respect to equation \ref{eq:LC}  to be computed more accurately. 
+In practice the two minimisations are never carried out in full for every iteration. Instead the problem is seen as reinforcement learning where the cost function is constantly changing (in the inner loop). In turn RL can be seen as an adaptive sampler that samples the lowest cost regions of c(s,a) and thus allows the gradient with respect to Equation \ref{eq:LC}  to be computed more accurately. 
 
 In generative adversarial imitation learning $\mathcal{L}_c$  is given a specific form:
 
-\[
-\mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] - E_{\pi_A}[\log(1- D(s,a))]
-\]
+\begin{equation}
+  \mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] - E_{\pi_A}[\log(1- D(s,a))] \label{eq:LCgail}
+\end{equation}
 
 Where D(s,a) is a discriminative classifier mapping $S\times A \rightarrow [0,1]$.
 
-Note however that this form can also be used, which is more consistent with equation \ref{eq:LC}
+Note however that this form can also be used, which is more consistent with Equation \ref{eq:LC}
 
-\[
-\mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))]
-\]
+\begin{equation}
+  \mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))] \label{eq:LCgail2}
+\end{equation}
 
 and is more consistent with the cost function used in the RL step in practice.
 
-\[
-\mathcal{L}_{\pi} = -H(\pi_A) - E_{\pi_A}[\log(D(s,a))] \label{eq:LP}
-\] 
+\begin{equation}
+  \mathcal{L}_{\pi} = -H(\pi_A) - E_{\pi_A}[\log(D(s,a))] \label{eq:LPgail}
+\end{equation}
 
 In this view we essentially have that $c(s,a) = -\log(D(s,a))$. We will use this representation for a cost function from now on.
 
 
 \section{Proposal}
 
-Lets now assume the presence of \emph{failed demonstrations}, i.e, demonstrations coming from a policy $\pi_E$ for which the expected cost $E_{\pi_F}(c(s,a))$ should be maximal.
+Lets now assume the presence of \emph{failed demonstrations}, i.e, demonstrations coming from a policy $\pi_F$ for which the expected cost $E_{\pi_F}(c(s,a))$ should be maximal.
 
 The need for $\pi_E$ clearly diminishes if we have access to two pieces of information.
 
@@ -140,33 +142,38 @@ In practice none of the above is true. So our proposition is that having access 
 
  We could use $\pi_F$ by modifying our original minimisation expression to something like:
 
-\[
-\mathcal{L}_c = E_{\pi_E}[-\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))] + E_{\pi_F}[\log(D(s,a))] \label{eq:LCf}
-\]
+\begin{equation}
+  \mathcal{L}_c = E_{\pi_E}[-\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))] + E_{\pi_F}[\log(D(s,a))] \label{eq:LCf}
+\end{equation}
 
-Meaning that we now use the failed demonstrations dataset when computing the gradient for the total cost function. This would be fine except from the fact that it does not explicitly require the difference of the expected cost of the agents policy $\pi$ to be maximally different from the expected cost of the failed demonstrations. This is done only implicitly by the whole process, because the minimisation of equation \ref{eq:LP} implies that $E_{\pi}[c(s,a)]$ is minimised thus moving closer to $E_{\pi_E}[c(s,a)]$. We would ideally however like the to use the additional data to facilitate the search for a policy that not only resembles $\pi_E$ maximally but it is also maximally different from $\pi_F$. To do this we could introduce another cost estimator and as a consequence a third optimisation problem.
+Meaning that we now use the failed demonstrations dataset when computing the gradient for the total cost function. This would be fine except from the fact that it does not explicitly require the difference of the expected cost of the agents policy $\pi$ to be maximally different from the expected cost of the failed demonstrations. This is done only implicitly by the whole process, because the minimisation of Equation \ref{eq:LP} implies that $E_{\pi}[c(s,a)]$ is minimised thus moving closer to $E_{\pi_E}[c(s,a)]$. We would ideally however like the to use the additional data to facilitate the search for a policy that not only resembles $\pi_E$ maximally but it is also maximally different from $\pi_F$. To do this we could introduce another cost estimator and as a consequence a third optimisation problem.
 
-\[
-\mathcal{L}_{c'} = E_{\pi_A}[-\log(D'(s,a))] + E_{\pi_F}[\log(D'(s,a))] \label{eq:LCp}
-\]
-Minimising this expression assigns low cost to the policy and a high cost to the failed demonstrations. The cost function 
+\begin{equation}
+  \mathcal{L}_{c'} = E_{\pi_A}[-\log(D'(s,a))] + E_{\pi_F}[\log(D'(s,a))] \label{eq:LCp}
+\end{equation}
+
+Minimising this expression assigns low cost to the policy and a high cost to the failed demonstrations. Note that in this case $D'(s,a)=1$ denotes that $(s,a)$ belongs to the apprentice. The cost function 
 $-\log(D'(s,a))$ can then be used to drive the policy away from $\pi_F$ using an augmented version of the minimisation in equation \ref{eq:LP}:
 
-\[
-\mathcal{L}_{\pi} = -H(\pi) - E_{\pi}[[\log(D(s,a))) + \log(D'(s,a))].  \label{eq:LPaug}
-\]
+\begin{equation}
+  \mathcal{L}_{\pi} = -H(\pi) - E_{\pi}[[\log(D(s,a))) + \log(D'(s,a))].  \label{eq:LPaug}
+\end{equation}
 
 \subsection{Learning from Failure as a three class problem}
 
-A key observation that can be made now is that the two cost functions (classifiers) D(s,a) and D'(s,a) along with their respective optimisation equations $\mathcal{L}_c',\mathcal{L}_c$ can be essentially folded into a single three class classification problem that tries to classify samples from each policy ($\pi_E$,$\pi_F$,$\pi_A$) into its respective class (Proof needed). The minimisation can then be seen as minimizing the cross entropy for this classifier. The policy optimisation step can be then seen as trying to fool this classifier into not only classifying the policy as part of the expert but also as trying to minimise the chances that a state action pair is classified as coming from $\pi_F$. We denote as $P_C(\pi=\pi'|s,a)$ the probability of classifying a sample as coming from a policy $\pi'$. The new optimisation problem would then be:
+A key observation that can be made now is that the two cost functions (classifiers) D(s,a) and D'(s,a) along with their respective optimisations $\mathcal{L}_c',\mathcal{L}_c$ 
+can be essentially folded into a single three class classification problem that tries to classify samples from each policy ($\pi_E$,$\pi_F$,$\pi_A$) into its respective class (Proof needed). 
+The minimisation can then be seen as minimizing the cross entropy for this classifier. The policy optimisation step can be then seen as trying to fool this classifier into not only classifying the policy as part 
+of the expert but also as trying to minimise the chances that a state action pair is classified as coming from $\pi_F$. We denote as $P_C(\pi=\pi'|s,a)$ the probability of classifying a sample as coming from a policy $\pi'$. 
+The new optimisation problem would then be:
 
 \begin{align}
-    \mathcal{L}_C = & -\Big[ E_{\pi_E}[\log(P_C(\pi=\pi_E))] +\\ &E_{\pi_A}[\log(P_C(\pi=\pi_E))] +\\ &E_{\pi_F}[\log(P_C(\pi=\pi_E))]\Big]  
+    \mathcal{L}_C = & -\Big[ E_{\pi_E}[\log(P_C(\pi=\pi_E))] +\\ &E_{\pi_A}[\log(P_C(\pi=\pi_A))] +\\ &E_{\pi_F}[\log(P_C(\pi=\pi_F))]\Big]  
 \end{align}
 
-\[
-    \mathcal{L_\pi} = -H(\pi) + E_{\pi_A}(P_C(\pi=\pi_E|s,a) - P_C(\pi=\pi_F|s,a)) 
-\]
+\begin{equation}
+      \mathcal{L_\pi} = -H(\pi) + E_{\pi_A}(\log(P_C(\pi=\pi_E|s,a)) - \log(P_C(\pi=\pi_F|s,a))) 
+\end{equation}
 
 \subsection{An example}
 
