@@ -1,0 +1,38 @@
+from helpers import PartialRollout
+import pickle
+import numpy as np
+
+class DemonstrationManager(object):
+    def __init__(self,base_filename,demonstration_length=None):
+        #Here I need to define wether on not this will be symmetric or not. In theory I can use a non symetric demonstrations
+        # if I will be updating the discriminator with a batch size of 1. and I can have batched if this is not the case.
+        # It looks also wise that if I will follow the A3C convention I only use one trajectory at a time. if I use DQN things would change.
+        # Functions of the demonstration manager:
+        # Collect demonstrations and make sure that they are of a certain size if a certain flag is turned on. If not arbitrary
+        # demonstration shapes can be saved
+        # Load demonstrations from a file. so they can be used as data. Provide shuffle and batch methods for that data.
+        # DEmonstrations should be saved with a date.
+        # Demonstration manager should have modes. Recording, learning and any other mode thats usefull
+        # looking at this its probably a good idea to have this split in two. A demonstration Recorder and a demonstartion loader.
+        # The loader should also have the choice of splitting the potentially uneven demonstrations into equan chunks to be used for DQN.
+        self.base_filename = base_filename
+        self.trajectories = [] # This will be a list of the type Partial Rollout
+    def append(self,rollout):
+        self.trajectories.append(rollout)
+    def get(self,number=1,length=None):
+        # get random number of demonstrations of size length each.
+        # Byt default returns a random demonstration from the rollout in full length.
+        idx = np.random.randint(number)
+        out = []
+        for i in idx:
+            if i < len(self.trajectories):
+                out.append(self.trajectories[number])
+        return out
+
+
+    def save(self):
+        dic = {"states": self.states, "actions": self.actions}
+        with open(self.base_filename + str(self.counter) + ".pkl", 'wb') as handle:
+            pickle.dump(dic, handle)
+        self.counter+=1
+

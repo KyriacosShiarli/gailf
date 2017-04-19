@@ -81,11 +81,12 @@ Model Free IRLF - Proposal
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \begin{abstract}
-This is a proposal as to how the IRLF framework can be applied to newer model-free IRL methods that allow learning in large environments.
+Inverse Reinforcement Learning (IRL) methods allow agent to learn complex tasks from demonstration making them especially appealing in cases where reward functions are either too sparse or non-existent. Recent developements in the field have allowed IRL to perform well in substancially larger spaces than before. This paper describes methods that extend the Model-free Inverse Reinforcement Learning methods allowing failed demonstrations to be incorporated in the learning. We begin with a a general description of IRL and describe how it can be applied to large statespaces. We then go on to show that the framework can be easily extended to exploit data from failed trajectories i.e., trajectories with a high cost. Our experiments show that our framework can be used to learn an imitation policy in large state spaces faster and better. 
 \end{abstract}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{IntroductionS}
+\section{Introduction}
+\section{Generative Adversatial Imitation learning}
 We will denote the expert policy as $\pi_E$ and the agent policy by $\pi_A$. We look for a cost function $c \in C$ that appoints low cost exclusively to data from $\pi_E$. 
 
 In the original IRL setting the optimisation problem can be broken down into two loss functions to be minimised.
@@ -102,17 +103,15 @@ In the original IRL setting the optimisation problem can be broken down into two
 Where $H(\pi_A)$ is the causal entropy of the policy $\pi_A$ and promotes policies to be more flat. 
 The first minimisation is performed using gradient descent by taking the derivative of $\mathcal{L}_c$ with respect to $c$. The second is performed by planning or reinforcement learning (RL) on the underlying MDP. The first minimisation attempts to assign a large cost to state action pairs used by $\pi_A$ and low cost to the expert trajectories ($\pi_E$). The second minimisation tries to find the policy with the lowest possible cost. 
 
-In practice the two minimisations are never carried out in full for every iteration. Instead the problem is seen as reinforcement learning where the cost function is constantly changing (in the inner loop). In turn RL can be seen as an adaptive sampler that samples the lowest cost regions of c(s,a) and thus allows the gradient with respect to Equation \ref{eq:LC}  to be computed more accurately. 
+In practice the two minimisations are never carried out in full for every iteration. Instead the problem is seen as reinforcement learning where the cost function is constantly changing (in the inner loop). In turn RL can be seen as an adaptive sampler that samples the lowest cost regions of c(s,a) and thus allows the gradient with respect to Equation \ref{eq:LC}  to be computed more accurately.
 
-In generative adversarial imitation learning $\mathcal{L}_c$  is given a specific form:
+Using different models for the cost function $c(s,a)$ and the RL step in equation \ref{eq:LP} can yield a range of algorithms. A recent method called Generative Adversarial Imitation learning assumes a cost function of the form $c(s,a) = -\log(D(s,a))$ where D(s,a) is a discriminative classifier that maps $S \times A \rightarrow 1$. The discriminator attempts to output D(s,a) =1 for samples originating from the expert and D(s,a) for samples originating from the agent. Equation \ref{eq:LC} hence takes the following from:
 
 \begin{equation}
   \mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] - E_{\pi_A}[\log(1- D(s,a))] \label{eq:LCgail}
 \end{equation}
 
-Where D(s,a) is a discriminative classifier mapping $S\times A \rightarrow [0,1]$.
-
-Note however that this form can also be used, which is more consistent with Equation \ref{eq:LC}
+Note however that the following form can also be used, which is more consistent with Equation \ref{eq:LC}
 
 \begin{equation}
   \mathcal{L}_c = -E_{\pi_E}[\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))] \label{eq:LCgail2}
@@ -124,40 +123,49 @@ and is more consistent with the cost function used in the RL step in practice.
   \mathcal{L}_{\pi} = -H(\pi_A) - E_{\pi_A}[\log(D(s,a))] \label{eq:LPgail}
 \end{equation}
 
-In this view we essentially have that $c(s,a) = -\log(D(s,a))$. We will use this representation for a cost function from now on.
+In this paper we will be using the GAIL formulation mainly because of its intuitive nature. Most ideas in this paper however generalise to other forms of this cost function. 
 
+An important feature of GAIL and in general IRL, is that the trajectories are in essence labeled as coming from an expert. This in turn implies that the demonstrated trajectories should have low cost which brings about the formulation we have seen above. In the next sections we will intoduce \emph{failed} demonstartions into the framework, i.e., demonstrations with that have a high cost under the underlying cost function.
 
-\section{Proposal}
+\section{GAIL from failure}
+In this section we assume the presence of failed demonstrations in our dataset. In contrast with expert demonstrations which are assumed to have minimal cost, failed demonsrations represent trajectories with a high cost. We will represent the policy of failed demonstrations as $pi_f$ and we would like our final policy $\pi_A$ to be as different from $pi_F$ as possible. In this section we document several ways to incorporate this aditional data in the GAIL framework, discussing the benefits and caveats of each approach.
 
-Lets now assume the presence of \emph{failed demonstrations}, i.e, demonstrations coming from a policy $\pi_F$ for which the expected cost $E_{\pi_F}(c(s,a))$ should be maximal.
-
-The need for $\pi_E$ clearly diminishes if we have access to two pieces of information.
-
-\begin{itemize}
-    \item We have full access to $\pi_E$
-    \item We know that $\pi_E$ is indeed the optimal policy.
-\end{itemize}
-
-In practice none of the above is true. So our proposition is that having access to state action pairs that should be avoided can aid learning the right policy faster and better. In the next section we will give an indicative example where such a proposition is true.
-
- We could use $\pi_F$ by modifying our original minimisation expression to something like:
+\subsection{Different Views of failure}
+Since in IRL we try to make trajectories from $\pi_{E}$ have less cost than all other trajectories, a natural first natural extension of the original formulation would be to treat data from $\pi_{E}$  as just data for which the cost should be high, resulting in:
 
 \begin{equation}
   \mathcal{L}_c = E_{\pi_E}[-\log(D(s,a))] + E_{\pi_A}[\log(D(s,a))] + E_{\pi_F}[\log(D(s,a))] \label{eq:LCf}
 \end{equation}
 
-Meaning that we now use the failed demonstrations dataset when computing the gradient for the total cost function. This would be fine except from the fact that it does not explicitly require the difference of the expected cost of the agents policy $\pi$ to be maximally different from the expected cost of the failed demonstrations. This is done only implicitly by the whole process, because the minimisation of Equation \ref{eq:LP} implies that $E_{\pi}[c(s,a)]$ is minimised thus moving closer to $E_{\pi_E}[c(s,a)]$. We would ideally however like the to use the additional data to facilitate the search for a policy that not only resembles $\pi_E$ maximally but it is also maximally different from $\pi_F$. To do this we could introduce another cost estimator and as a consequence a third optimisation problem.
+As a result the additional data will be used in order to better estimate the gradient of $\mathcal{L}_c$. While this approach is very simple and straightforward it only makes use of the information that $\pi_F$ is not $\pi_E$ and does not use the fact that these are failed demonstrations with a very high (if not the highest possible) cost. We would ideally however like the to use the additional data to facilitate the search for a policy that not only resembles $\pi_E$ maximally but it is also maximally different from $\pi_F$. To do this we could introduce another cost estimator and as a consequence a third optimisation problem.
 
 \begin{equation}
-  \mathcal{L}_{c'} = E_{\pi_A}[-\log(D'(s,a))] + E_{\pi_F}[\log(D'(s,a))] \label{eq:LCp}
+  \mathcal{L}_{c'} = E_{\pi_A}[\log(D'(s,a))] - E_{\pi_F}[\log(D'(s,a))] \label{eq:LCp}
 \end{equation}
 
-Minimising this expression assigns low cost to the policy and a high cost to the failed demonstrations. Note that in this case $D'(s,a)=1$ denotes that $(s,a)$ belongs to the apprentice. The cost function 
-$-\log(D'(s,a))$ can then be used to drive the policy away from $\pi_F$ using an augmented version of the minimisation in equation \ref{eq:LP}:
+Minimising this expression assigns low cost to $\pi_A$ and a high cost to the failed demonstrations. Note that as before $D'(s,a)=1$ denotes that $(s,a)$ belongs to the data. The cost function $\log(D'(s,a))$ can then be used to drive the policy away from $\pi_F$ using an augmented version of the minimisation in equation \ref{eq:LP}:
 
 \begin{equation}
-  \mathcal{L}_{\pi} = -H(\pi) - E_{\pi}[[\log(D(s,a))) + \log(D'(s,a))].  \label{eq:LPaug}
+  \mathcal{L}_{\pi} = -H(\pi) -E_{\pi}[[\log(D(s,a))) + \lambda \log(D'(s,a))].  \label{eq:LPaug}
 \end{equation}
+
+Where $\lambda$ is a parameter that determines how much attention we pay to the failed demonstrations. An important observation at this point is that the relationship between the third term in \ref{eq:LPaug} and the minimisation in \label{eq:LCp} is no longer adversarial. This is reasonable since we are clearly not interested in matching the distribution $\pi_F$ but to avoid it. 
+
+A second observation is that we have ended up with a parameter, $\lambda$ that we need to tune. To do so we will use the relationship between $\pi_F$ and $\pi_E$ which we have not yet exploited. Asume therefore a third classifier $D''(s,a)$ which discriminates between $\pi_E$ and $\pi_F$ this minimizing,
+
+\begin{equation}
+  \mathcal{L}_{D''} = E_{\pi_E}[\log(D''(s,a))] + E_{\pi_F}[\log(1-D''(s,a))] \label{eq:LCpp}
+\end{equation}
+
+At the minimum this classifier provides us with a probability that a state action pair comes from $\pi_E$ or $\pi_F$ which in turn acts as a state-dependent weight for the state action pairs encountered during Equation \ref{eq:LPaug} resulting in,
+
+\begin{equation}
+  \mathcal{L}_{\pi} = -H(\pi) -E_{\pi}[[ D''(s,a) \log(D(s,a))) + (1-D''(s,a)) \log(D'(s,a))].  \label{eq:LPaug2}
+\end{equation}
+
+Intuitively, if a state-action pair is seen as being closer to $\pi_E$ i.e., D''(s,a)>0.5 more weight is given to the cost assigned by $D(s,a)$ conversely if D''(s,a)<0.5 more weight is given to $D'(s,a)$. In adition with providing some way to weigh the two cost terms this formulation has a the propery of dealing with the partial trajectory problem mentioned earlier (need to mention this earlier). If a part of trajectories from $\pi_F$ and $\pi_E$ is shared then the state action pairs will not be separable resulting in  $D''(s,a)=0.5$ which would potentially cancel the terms in \ref{eq:LPaug2} out.
+
+
 
 \subsection{Learning from Failure as a three class problem}
 
@@ -178,6 +186,40 @@ The new optimisation problem would then be:
 \subsection{An example}
 
 Need to come up with this. 
+
+\section{Experiments}
+
+\subsection{Continuous control}
+Demonstrate the validity of the method in continuous control tasks.
+
+Demonstrations will be collected as follows:
+\begin{itemize}
+ \item Solve the task using an RL method.
+ \item Collecte $N_E$ best trajectories from the learning.
+ \item Collect $N_F$ worse trajectories from the learning. 
+ \item Use this data as successful and failed demonstrations.
+\end{itemize}
+
+Using these relatively simple tasks I would like to investigate if learning from failure can:
+
+\begin{itemize}
+ \item Make learning more stable (do learning at various learning rates)
+ \item Make learning more data efficient by needing less expert demonstrations
+ \item make learning better in general.
+\end{itemize}
+
+Preliminary results here.
+
+\subsection{Video games}
+
+I will use 2 video games Pong and Mario cart. Pong I will use because it can be easily solved using simple Deep RL methods such as DQN. Mario cart I will use because I found a way to collect demonstrations from it. With pong I will do a similar analysis to the continuous control case. With mario I will only learn using actual demonstrations and not the real reward signal so show that this can be applied to real world settings. 
+
+
+
+
+
+
+
 
 
 
