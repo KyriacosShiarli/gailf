@@ -1,9 +1,9 @@
 import scipy.signal
 import numpy as np
 from collections import namedtuple
-
+import pdb
 Batch = namedtuple("Batch", ["si", "a", "adv", "r", "terminal", "features"])
-IRL_Batch = namedtuple("IRL_Batch", ["si", "a", "features"])
+IRL_Batch = namedtuple("IRL_Batch", ["si", "a",'features'])
 
 def discount(x, gamma):
     return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
@@ -23,7 +23,8 @@ given a rollout, compute its returns and the advantage
     # this formula for the advantage comes "Generalized Advantage Estimation":
     # https://arxiv.org/abs/1506.02438
     batch_adv = discount(delta_t, gamma * lambda_)
-
+    if len(rollout.importance_ratios) !=0:
+        batch_adv *= np.array(rollout.importance_ratios)
     features = rollout.features[0]
     return Batch(batch_si, batch_a, batch_adv, batch_r, rollout.terminal, features)
 
@@ -35,8 +36,11 @@ given a rollout, compute its returns and the advantage
     batch_a = np.asarray(rollout.actions)
     #rewards = np.asarray(rollout.rewards)
     #vpred_t = np.asarray(rollout.values + [rollout.r])
-    features = rollout.r_features[0] # TODO: FIGURE THIS OUT MAYBE ASK SOMEBODY
-    return IRL_Batch(batch_si, batch_a, features)
+    if len(rollout.r_features)!=0:
+        features = rollout.r_features[0] # TODO: FIGURE THIS OUT MAYBE ASK SOMEBODY. I will be setting these to 0
+    else:
+        features = None
+    return IRL_Batch(batch_si, batch_a,features)
 
 
 
@@ -54,6 +58,7 @@ once it has processed enough steps.
         self.terminal = False
         self.features = []
         self.r_features = []
+        self.importance_ratios = []
 
     def add(self, state, action, reward, value, terminal, features,r_features=None):
         self.states += [state]

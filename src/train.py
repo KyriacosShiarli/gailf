@@ -19,6 +19,12 @@ parser.add_argument('-n', '--dry-run', action='store_true',
 parser.add_argument('-m', '--mode', type=str, default='tmux',
                     help="tmux: run workers in a tmux session. nohup: run workers with nohup. child: run workers as child processes")
 
+parser.add_argument('-d', '--demonstrations', type=str, default=None,
+                    help="Wether or not the model should learn from demonstration data given as an input directory, or learn from game generated rewards.")
+
+parser.add_argument('-rec', '--record', action='store_true', default=False,
+                    help="Wether or not the best trajectories during learning should be recorded. Useful for collecting demonstrations")
+
 # Add visualise tag
 parser.add_argument('--visualise', action='store_true',
                     help="Visualise the gym environment by running env.render() between each timestep")
@@ -35,7 +41,7 @@ def new_cmd(session, name, cmd, mode, logdir, shell):
         return name, "nohup {} -c {} >{}/{}.{}.out 2>&1 & echo kill $! >>{}/kill.sh".format(shell, shlex_quote(cmd), logdir, session, name, logdir)
 
 
-def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash', mode='tmux', visualise=False):
+def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash', mode='tmux', visualise=False,demonstrations = None,record=False):
     # for launching the TF workers and for launching tensorboard
     base_cmd = [
         'CUDA_VISIBLE_DEVICES=',
@@ -47,12 +53,18 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
     if visualise:
         base_cmd += ['--visualise']
 
+    if demonstrations is not None:
+        base_cmd+=['--demonstrations', demonstrations]
+
+    if record:
+        base_cmd+=['--record']
+
     if remotes is None:
         remotes = ["1"] * num_workers
     else:
         remotes = remotes.split(',')
         assert len(remotes) == num_workers
-
+    print base_cmd
     cmds_map = [new_cmd(session, "ps", base_cmd + ["--job-name", "ps"], mode, logdir, shell)]
     for i in range(num_workers):
         cmds_map += [new_cmd(session,
@@ -97,7 +109,8 @@ def create_commands(session, num_workers, remotes, env_id, logdir, shell='bash',
 
 def run():
     args = parser.parse_args()
-    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.env_id, args.log_dir, mode=args.mode, visualise=args.visualise)
+    cmds, notes = create_commands("a3c", args.num_workers, args.remotes, args.env_id, args.log_dir, mode=args.mode,
+                                  visualise=args.visualise,record=args.record,demonstrations=args.demonstrations)
 
     if args.dry_run:
         print("Dry-run mode due to -n flag, otherwise the following commands would be executed:")

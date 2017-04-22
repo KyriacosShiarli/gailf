@@ -3,6 +3,8 @@ import threading
 import six.moves.queue as queue
 import tensorflow as tf
 import pdb
+from demonstration_manager import DemonstrationManager
+import numpy as np
 
 class RunnerThread(threading.Thread):
     """
@@ -10,8 +12,9 @@ One of the key distinctions between a normal environment and a universe environm
 is that a universe environment is _real time_.  This means that there should be a thread
 that would constantly interact with the environment and tell it what to do.  This thread is here.
 """
-    def __init__(self, env, policy, num_local_steps, visualise, reward_f = None):
+    def __init__(self, env, policy, num_local_steps, visualise, reward_f = None,record = False):
         threading.Thread.__init__(self)
+        self.record = record
         self.queue = queue.Queue(5)
         self.num_local_steps = num_local_steps
         self.env = env
@@ -19,6 +22,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
         self.policy = policy
         self.daemon = True
         self.sess = None
+
         self.summary_writer = None
         self.visualise = visualise
         self.reward_f = reward_f
@@ -33,7 +37,11 @@ that would constantly interact with the environment and tell it what to do.  Thi
             self._run()
 
     def _run(self):
-        rollout_provider = env_runner(self.env, self.policy, self.num_local_steps, self.summary_writer, self.visualise,reward_f=self.reward_f)
+        if self.record:
+            rollout_provider = recording_runner(self.env, self.policy, self.num_local_steps, self.summary_writer,
+                                          self.visualise)
+        else:
+            rollout_provider = env_runner(self.env, self.policy, self.num_local_steps, self.summary_writer, self.visualise,reward_f=self.reward_f)
         while True:
             # the timeout variable exists because apparently, if one worker dies, the other workers
             # won't die with it, unless the timeout is set to some large number.  This is an empirical
@@ -43,7 +51,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
 
 
 
-def env_runner(env, policy, num_local_steps, summary_writer, render,reward_f=None):
+def env_runner(env, policy, num_local_steps, summary_writer, render,reward_f=None,record=False):
     """
 The logic of the thread runner.  In brief, it constantly keeps on running
 the policy, and as long as the rollout exceeds a certain length, the thread
@@ -53,9 +61,89 @@ runner appends the policy to the queue.
     last_features = policy.get_initial_features()
     if reward_f is not None:
         reward_f_features = reward_f.get_initial_features()
+        irl_rewards = 0
     length = 0
     rewards = 0
 
+    while True:
+        terminal_end = False
+        rollout = PartialRollout()
+        for _ in range(num_local_steps):
+            fetched = policy.act([last_state], *last_features)
+            action, value_, features = fetched[0], fetched[1], fetched[2:]
+
+
+            # argmax to convert from one-hot
+            state, reward, terminal, info = env.step(action.argmax())
+            actual_reward = reward
+            if render:
+                env.render()
+
+            if reward_f is not None:
+                # If there is an external reward function use that.
+
+                r_fetched = reward_f.reward([last_state],[action],*reward_f_features)
+                reward = r_fetched[0][0,0] #-r_fetched[0][0,1] #
+                irl_rewards+=reward
+                r_features = r_fetched[2]
+
+                rollout.add(last_state, action, reward, value_, terminal, last_features,r_features)
+                reward_f_features = r_features
+            else:
+                rollout.add(last_state, action, reward, value_, terminal, last_features)
+
+            # collect the experience
+
+            length += 1
+            rewards += actual_reward
+
+            last_state = state
+            last_features = features
+
+            if info:
+                summary = tf.Summary()
+                for k, v in info.items():
+                    summary.value.add(tag=k, simple_value=float(v))
+                if reward_f is not None:
+                    summary.value.add(tag="global/discriminator_reward", simple_value=float(reward))
+                summary_writer.add_summary(summary, policy.global_step.eval())
+                summary_writer.flush()
+
+            timestep_limit = env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
+            if terminal or length >= timestep_limit:
+                terminal_end = True
+                if length >= timestep_limit or not env.metadata.get('semantics.autoreset'):
+                    last_state = env.reset()
+                last_features = policy.get_initial_features()
+                print("Episode finished. Sum of rewards: %d. Length: %d" % (rewards, length))
+                #with tf.device(tf.train.replica_device_setter(1)):
+                if reward_f is not None:
+                    print("IRL REWARDS: {}. Average: {}".format(irl_rewards,irl_rewards/length))
+                    irl_rewards=0
+
+                length = 0
+                rewards = 0
+
+                break
+
+        if not terminal_end:
+            rollout.r = policy.value(last_state, *last_features)
+
+        # once we have enough experience, yield it, and have the ThreadRunner place it on a queue
+        yield rollout
+
+
+
+def recording_runner(env, policy, num_local_steps, summary_writer, render):
+    """
+    A thread runner that records the best and worse trajectories of the thread
+    """
+    recorder = DemonstrationManager("../data/pong/demonstrations")
+    last_state = env.reset()
+    last_features = policy.get_initial_features()
+    length = 0
+    rewards = 0
+    demonstration = PartialRollout()
     while True:
         terminal_end = False
         rollout = PartialRollout()
@@ -69,20 +157,9 @@ runner appends the policy to the queue.
             if render:
                 env.render()
 
-            if reward_f is not None:
-                # If there is an external reward function use that.
+            rollout.add(last_state, action, reward, value_, terminal, last_features)
 
-                r_fetched = reward_f.reward(last_state,action,*reward_f_features)
-                reward = r_fetched[0][0,0]# TODO LOG THIS THE RIGHT WAY!
-                r_features = r_fetched[1]
-
-                rollout.add(last_state, action, reward, value_, terminal, last_features,r_features)
-                reward_f_features = r_features
-            else:
-                rollout.add(last_state, action, reward, value_, terminal, last_features)
-
-
-            # collect the experience
+            demonstration.add(last_state, action, reward, value_, terminal, last_features)
 
             length += 1
             rewards += reward
@@ -104,6 +181,8 @@ runner appends the policy to the queue.
                     last_state = env.reset()
                 last_features = policy.get_initial_features()
                 print("Episode finished. Sum of rewards: %d. Length: %d" % (rewards, length))
+                recorder.append_to_best(demonstration)
+                demonstration = PartialRollout()
                 length = 0
                 rewards = 0
                 break
@@ -113,4 +192,3 @@ runner appends the policy to the queue.
 
         # once we have enough experience, yield it, and have the ThreadRunner place it on a queue
         yield rollout
-
