@@ -53,56 +53,57 @@ class LSMTAbstract(object):
         for i in range(4):
             x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
         # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
-        self.conv_out = flatten((x), [0])
+        self.conv_out = flatten(x)
 
     def attach_heads(self,type,size):
+        with tf.variable_scope(type):
+            x = self.conv_out
+            #if type =="reward":
+                #self.action = tf.placeholder(tf.float32, [None] + list([self.ac_space]))
+                #x = tf.concat([self.conv_out,self.action],1)
+            x = tf.expand_dims(x, [0])
 
-        if type =="reward":
-            x = tf.concat([self.conv_out,self.action],1)
-        elif type=="policy":
-            x = tf.expand_dims(self.conv_out, [0])
+            if use_tf100_api:
+                lstm = rnn.BasicLSTMCell(size, state_is_tuple=True)
+            else:
+                lstm = rnn.rnn_cell.BasicLSTMCell(size, state_is_tuple=True)
 
-        if use_tf100_api:
-            lstm = rnn.BasicLSTMCell(size, state_is_tuple=True)
-        else:
-            lstm = rnn.rnn_cell.BasicLSTMCell(size, state_is_tuple=True)
+            if type == 'reward': self.r_state_size = lstm.state_size
+            if type == 'policy': self.p_state_size = lstm.state_size
+            step_size = tf.shape(self.x)[:1]
+            c_init = np.zeros((1, lstm.state_size.c), np.float32)
+            h_init = np.zeros((1, lstm.state_size.h), np.float32)
+            if type == 'reward': self.r_state_init = [c_init, h_init]
+            if type == 'policy': self.p_state_init = [c_init, h_init]
+            c_in = tf.placeholder(tf.float32, [1, lstm.state_size.c])
+            h_in = tf.placeholder(tf.float32, [1, lstm.state_size.h])
+            if type == 'reward': self.r_state_in = [c_in, h_in]
+            if type == 'policy': self.p_state_in = [c_in, h_in]
+            if use_tf100_api:
+                state_in = rnn.LSTMStateTuple(c_in, h_in)
+            else:
+                state_in = rnn.rnn_cell.LSTMStateTuple(c_in, h_in)
+            lstm_outputs, lstm_state = tf.nn.dynamic_rnn(
+                lstm, x, initial_state=state_in, sequence_length=step_size,
+                time_major=False)
+            lstm_c, lstm_h = lstm_state
 
-        if type == 'reward': self.r_state_size = lstm.state_size
-        if type == 'policy': self.p_state_size = lstm.state_size
-        state_size = lstm.state_size
-        step_size = tf.shape(self.x)[:1]
-        c_init = np.zeros((1, lstm.state_size.c), np.float32)
-        h_init = np.zeros((1, lstm.state_size.h), np.float32)
-        if type == 'reward': self.r_state_init = [c_init, h_init]
-        if type == 'policy': self.p_state_init = [c_init, h_init]
-        c_in = tf.placeholder(tf.float32, [1, lstm.state_size.c])
-        h_in = tf.placeholder(tf.float32, [1, lstm.state_size.h])
-        if type == 'reward': self.r_state_in = [c_in, h_in]
-        if type == 'policy': self.p_state_in = [c_in, h_in]
-        if use_tf100_api:
-            state_in = rnn.LSTMStateTuple(c_in, h_in)
-        else:
-            state_in = rnn.rnn_cell.LSTMStateTuple(c_in, h_in)
-        lstm_outputs, lstm_state = tf.nn.dynamic_rnn(
-            lstm, x, initial_state=state_in, sequence_length=step_size,
-            time_major=False)
-        lstm_c, lstm_h = lstm_state
-        if type == 'reward':self.r_state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-        if type == 'policy': self.p_rew_state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-        x = tf.reshape(lstm_outputs, [-1, size])
-        if type == "policy":
-            self.p_logits = linear(x, self.ac_space, "action", normalized_columns_initializer(0.01))
-            self.probs = tf.nn.softmax(self.p_logits, name='action_probs')
-            self.vf = tf.reshape(linear(x, 1, "value", normalized_columns_initializer(1.0)), [-1])
-            self.state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-            self.sample = categorical_sample(self.p_logits, self.ac_space)[0, :]
+            if type == 'reward':self.r_state_out = [lstm_c[:1, :], lstm_h[:1, :]]
+            if type == 'policy': self.p_state_out = [lstm_c[:1, :], lstm_h[:1, :]]
+            x = tf.reshape(lstm_outputs, [-1, size])
+            if type == "policy":
+                self.p_logits = linear(x, self.ac_space, "action", normalized_columns_initializer(0.01))
+                self.probs = tf.nn.softmax(self.p_logits, name='action_probs')
+                self.vf = tf.reshape(linear(x, 1, "value", normalized_columns_initializer(1.0)), [-1])
+                self.state_out = [lstm_c[:1, :], lstm_h[:1, :]]
+                self.sample = categorical_sample(self.p_logits, self.ac_space)[0, :]
 
-        if type == "reward":
-            self.r_logits = linear(x, self.ac_space, "action", normalized_columns_initializer(0.01))
-            eps = tf.constant(1e-5)
-            self.d = tf.nn.softmax(self.r_logits)
-            self.rew = tf.log(self.d + eps)
-            self.rew_norm = self.rew / (-tf.log(eps))
+            if type == "reward":
+                self.r_logits = linear(x, self.ac_space, "r_logits", normalized_columns_initializer(0.01))
+                eps = tf.constant(1e-5)
+                self.d = tf.nn.softmax(self.r_logits)
+                self.rew = tf.log(self.d + eps)
+                self.rew_norm = self.rew /1 + 1.8 #(-tf.log(eps))
 
 class LSTMImitator(LSMTAbstract):
     def __init__(self,ob_space,ac_space):
@@ -110,8 +111,8 @@ class LSTMImitator(LSMTAbstract):
         super(LSTMImitator, self).__init__(ob_space,ac_space)
         self.attach_heads('reward',256)
         self.attach_heads('policy', 256)
-    def get_initial_features(self):
-        return self.state_init
+        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+
     def act(self, ob, c, h):
         sess = tf.get_default_session()
         return sess.run([self.sample, self.vf] + self.p_state_out,
@@ -124,149 +125,66 @@ class LSTMImitator(LSMTAbstract):
         sess = tf.get_default_session()
         return sess.run(self.vf, {self.x: [ob], self.p_state_in[0]: c, self.p_state_in[1]: h})[0]
     def get_initial_features(self):
-        return self.r_state_init,self.policy_state_init
+        return self.p_state_init, self.r_state_init
+    #def reward(self, ob, ac, c, h):
+    #    sess = tf.get_default_session()
+    #    return sess.run([self.rew_norm, self.d, self.r_state_out],
+    #                {self.x: ob, self.action: ac, self.r_state_in[0]: c, self.r_state_in[1]: h})
     def reward(self, ob, ac, c, h):
         sess = tf.get_default_session()
-        return sess.run([self.rew_norm, self.d, self.state_out],
-                    {self.x: ob, self.action: ac, self.r_state_in[0]: c, self.r_state_in[1]: h})
+        return sess.run([self.rew_norm, self.d, self.r_state_out],
+                        {self.x: ob, self.r_state_in[0]: c, self.r_state_in[1]: h})
 
 
-class LSTMPolicy(object):
+class LSTMPolicy(LSMTAbstract):
+    def __init__(self,ob_space,ac_space):
+        size = 256
+        with tf.variable_scope('policy'):
+            super(LSTMPolicy, self).__init__(ob_space,ac_space)
+        self.attach_heads('policy', size)
+        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+    def get_initial_features(self):
+        return self.p_state_init
+    def act(self, ob, c, h):
+        sess = tf.get_default_session()
+        return sess.run([self.sample, self.vf] + self.p_state_out,
+                        {self.x: ob, self.p_state_in[0]: c, self.p_state_in[1]: h})
+    def get_probs(self, ob, c, h):
+        sess = tf.get_default_session()
+        return sess.run([self.vf, self.probs] + self.state_out,
+                        {self.x: ob, self.p_state_in[0]: c, self.p_state_in[1]: h})
+    def value(self, ob, c, h):
+        sess = tf.get_default_session()
+        return sess.run(self.vf, {self.x: [ob], self.p_state_in[0]: c, self.p_state_in[1]: h})[0]
+
+
+class LSTMDiscriminator(LSMTAbstract):
+    def __init__(self,ob_space,ac_space):
+        size = 256
+        with tf.variable_scope('reward'):
+            super(LSTMDiscriminator, self).__init__(ob_space,ac_space)
+        self.attach_heads('reward', size)
+        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+    def get_initial_features(self):
+        return self.r_state_init
+    # def reward(self, ob, ac, c, h):
+    #     sess = tf.get_default_session()
+    #     return sess.run([self.rew_norm, self.d, self.r_state_out],
+    #                 {self.x: ob, self.action: ac, self.r_state_in[0]: c, self.r_state_in[1]: h})
+    #
+    def reward(self, ob, ac, c, h):
+        sess = tf.get_default_session()
+        return sess.run([self.rew_norm, self.d, self.r_state_out],
+                        {self.x: ob, self.r_state_in[0]: c, self.r_state_in[1]: h})
+
+class CONVDiscriminator(object):
     def __init__(self, ob_space, ac_space):
-        self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space))
+        self.size = 4 # memory size in the input
+        self.do = 0.3
+        self.ob_space = ob_space
+        self.ac_space = ac_space
+        self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space[:-1]) + [self.size])
         for i in range(4):
             x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
         # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
-        x = tf.expand_dims(flatten(x), [0])
-
-        size = 256
-        if use_tf100_api:
-            lstm = rnn.BasicLSTMCell(size, state_is_tuple=True)
-        else:
-            lstm = rnn.rnn_cell.BasicLSTMCell(size, state_is_tuple=True)
-        self.state_size = lstm.state_size
-        step_size = tf.shape(self.x)[:1]
-
-        c_init = np.zeros((1, lstm.state_size.c), np.float32)
-        h_init = np.zeros((1, lstm.state_size.h), np.float32)
-        self.state_init = [c_init, h_init]
-        c_in = tf.placeholder(tf.float32, [1, lstm.state_size.c])
-        h_in = tf.placeholder(tf.float32, [1, lstm.state_size.h])
-        self.state_in = [c_in, h_in]
-
-        if use_tf100_api:
-            state_in = rnn.LSTMStateTuple(c_in, h_in)
-        else:
-            state_in = rnn.rnn_cell.LSTMStateTuple(c_in, h_in)
-        lstm_outputs, lstm_state = tf.nn.dynamic_rnn(
-            lstm, x, initial_state=state_in, sequence_length=step_size,
-            time_major=False)
-        lstm_c, lstm_h = lstm_state
-        x = tf.reshape(lstm_outputs, [-1, size])
-
-        self.logits = linear(x, ac_space, "action", normalized_columns_initializer(0.01))
-        self.probs = tf.nn.softmax(self.logits,name = 'action_probs')
-        self.vf = tf.reshape(linear(x, 1, "value", normalized_columns_initializer(1.0)), [-1])
-        self.state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-        self.sample = categorical_sample(self.logits, ac_space)[0, :]
-        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
-
-    def get_initial_features(self):
-        return self.state_init
-
-    def act(self, ob, c, h):
-        sess = tf.get_default_session()
-        return sess.run([self.sample, self.vf] + self.state_out,
-                        {self.x: ob, self.state_in[0]: c, self.state_in[1]: h})
-    def get_probs(self, ob, c, h):
-        sess = tf.get_default_session()
-        return sess.run([self.vf,self.probs] + self.state_out,
-                        {self.x: ob, self.state_in[0]: c, self.state_in[1]: h})
-
-    def value(self, ob, c, h):
-        sess = tf.get_default_session()
-        return sess.run(self.vf, {self.x: [ob], self.state_in[0]: c, self.state_in[1]: h})[0]
-
-
-
-class LSTMDiscriminator(object):
-    def __init__(self, ob_space, ac_space):
-        self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space))
-        self.action = tf.placeholder(tf.float32, [None] + list([ac_space]))
-        for i in range(4):
-            x = tf.nn.elu(conv2d(x, 32, "ld{}".format(i + 1), [3, 3], [2, 2]))
-        # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
-        x = tf.concat([flatten(x),self.action],1)
-        x = tf.expand_dims(x, [0])
-
-        size = 256 # hidden units for the lstm state.
-        if use_tf100_api:
-            lstm = rnn.BasicLSTMCell(size, state_is_tuple=True)
-        else:
-            lstm = rnn.rnn_cell.BasicLSTMCell(size, state_is_tuple=True)
-        self.state_size = lstm.state_size
-        step_size = tf.shape(self.x)[:1]
-        c_init = np.zeros((1, lstm.state_size.c), np.float32)
-        h_init = np.zeros((1, lstm.state_size.h), np.float32)
-        self.state_init = [c_init, h_init]
-        c_in = tf.placeholder(tf.float32, [1, lstm.state_size.c])
-        h_in = tf.placeholder(tf.float32, [1, lstm.state_size.h])
-        self.state_in = [c_in, h_in]
-        if use_tf100_api:
-            state_in = rnn.LSTMStateTuple(c_in, h_in)
-        else:
-            state_in = rnn.rnn_cell.LSTMStateTuple(c_in, h_in)
-        lstm_outputs, lstm_state = tf.nn.dynamic_rnn(
-            lstm, x, initial_state=state_in, sequence_length=step_size,
-            time_major=False)
-        lstm_c, lstm_h = lstm_state
-        self.state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-        x = tf.reshape(lstm_outputs, [-1, size])
-        self.logits = linear(x, 2,  "class", normalized_columns_initializer(0.01))
-        eps = tf.constant(1e-10)
-        self.d = tf.nn.softmax(self.logits)
-        self.rew = tf.log(self.d + eps )
-        self.rew_norm = self.rew/(-tf.log(eps))
-
-        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
-
-    def get_initial_features(self):
-        return self.state_init
-    def reward(self, ob,ac, c, h):
-        sess = tf.get_default_session()
-        return sess.run([self.rew_norm,self.d,self.state_out], {self.x: ob,self.action: ac, self.state_in[0]:c, self.state_in[1]: h})
-
-
-class LSTMImitator(object):
-    def __init__(self, ob_space, ac_space):
-        self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space))
-        self.action = tf.placeholder(tf.float32, [None] + list([ac_space]))
-        for i in range(4):
-            x = tf.nn.elu(conv2d(x, 32, "ld{}".format(i + 1), [3, 3], [2, 2]))
-
-        self.rew_logits = self.attach_heads(x,"reward_logits",256)
-        self.policy_logits = self.attach_heads(x, "policy_logits", 256)
-
-        ## The reward oututs
-        eps = tf.constant(1e-5)
-        self.rew_probs = tf.nn.softmax(self.logits)
-        self.rew = tf.log(self.d + eps )
-        self.rew_norm = self.rew/(-tf.log(eps))
-
-        ## The value outputs
-        self.action_probs = tf.nn.softmax(self.policy_logits,name = 'action_probs')
-        self.vf = tf.reshape(linear(x, 1, "value", normalized_columns_initializer(1.0)), [-1])
-        self.state_out = [lstm_c[:1, :], lstm_h[:1, :]]
-        self.sample = categorical_sample(self.logits, ac_space)[0, :]
-        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
-
-        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
-
-
-
-
-    def get_initial_features(self):
-        return self.state_init
-    def reward(self, ob,ac, c, h):
-        sess = tf.get_default_session()
-        return sess.run([self.rew_norm,self.d,self.state_out], {self.x: ob,self.action: ac, self.state_in[0]:c, self.state_in[1]: h})
+        self.conv_out = flatten(x)

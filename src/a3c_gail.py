@@ -37,7 +37,7 @@ class RewardInterface(object):
                 with tf.variable_scope("rif"):
                     self.reward_f = reward_f = LSTMDiscriminator(env.observation_space.shape, env.action_space.n)
                 self.label = tf.placeholder(tf.float32, [None, 2], name="y")
-                self.loss = tf.nn.softmax_cross_entropy_with_logits(logits=reward_f.logits, labels=self.label,
+                self.loss = tf.nn.softmax_cross_entropy_with_logits(logits=reward_f.r_logits, labels=self.label,
                                                                     name="cent_loss")
 
                 self.loss_trunc = tf.reduce_mean(self.loss[self.context_size:])
@@ -58,7 +58,7 @@ class RewardInterface(object):
                 # inc_step = self.global_step.assign_add(tf.shape(reward_f.x)[0])
 
                 # each worker has a different set of adam optimizer parameters
-                opt = tf.train.AdamOptimizer(5e-8)
+                opt = tf.train.AdamOptimizer(1e-6)
                 self.train_op = opt.apply_gradients(grads_and_vars)
                 self.summary_writer = None
                 self.local_steps = 0
@@ -84,16 +84,16 @@ class RewardInterface(object):
             self.reward_f.x: batch_a.si,
             self.reward_f.action: batch_a.a,
             self.label: y_a,
-            self.reward_f.state_in[0]: np.zeros(batch_a.features[0].shape),
-            self.reward_f.state_in[1]: np.zeros(batch_a.features[1].shape),
+            self.reward_f.r_state_in[0]: np.zeros(batch_a.features[0].shape),
+            self.reward_f.r_state_in[1]: np.zeros(batch_a.features[1].shape),
         }
 
         feed_dict_e = {
             self.reward_f.x: batch_e.si,
             self.reward_f.action: batch_e.a,
             self.label: y_e,
-            self.reward_f.state_in[0]: np.zeros(batch_a.features[0].shape),
-            self.reward_f.state_in[1]: np.zeros(batch_a.features[1].shape),
+            self.reward_f.r_state_in[0]: np.zeros(batch_a.features[0].shape),
+            self.reward_f.r_state_in[1]: np.zeros(batch_a.features[1].shape),
         }
         fetches = [self.train_op,self.loss_trunc]
         if self.local_steps<10000000:
@@ -134,8 +134,8 @@ should be computed.
             self.adv = tf.placeholder(tf.float32, [None], name="adv")
             self.r = tf.placeholder(tf.float32, [None], name="r")
 
-            log_prob_tf = tf.nn.log_softmax(pi.logits)
-            prob_tf = tf.nn.softmax(pi.logits)
+            log_prob_tf = tf.nn.log_softmax(pi.p_logits)
+            prob_tf = tf.nn.softmax(pi.p_logits)
 
             # the "policy gradients" loss:  its derivative is precisely the policy gradient
             # notice that self.ac is a placeholder that is provided externally.
@@ -194,7 +194,7 @@ should be computed.
             inc_step = self.global_step.assign_add(tf.shape(pi.x)[0])
 
             # each worker has a different set of adam optimizer parameters
-            opt = tf.train.AdamOptimizer(1e-5)
+            opt = tf.train.AdamOptimizer(1e-4)
             self.train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
             self.summary_writer = None
             self.local_steps = 0
@@ -224,7 +224,7 @@ server. In the gail case we will need to decide wether or not this will need to 
 rollout structure.
 """
 
-        inject_prob = 0.1
+        inject_prob = 0.8
         inject = np.random.binomial(1,inject_prob)
 
         sess.run(self.sync)  # copy weights from shared to local
@@ -235,7 +235,7 @@ rollout structure.
         else:
             rollout = self.pull_batch_from_queue()
 
-        batch = process_rollout(rollout, gamma=0.99, lambda_=1.0)
+        batch = process_rollout(rollout, gamma=0.94, lambda_=1.0)
 
         should_compute_summary = self.task == 0 and self.local_steps % 11 == 0
 
@@ -249,8 +249,8 @@ rollout structure.
             self.ac: batch.a,
             self.adv: batch.adv,
             self.r: batch.r,
-            self.local_network.state_in[0]: batch.features[0],
-            self.local_network.state_in[1]: batch.features[1],
+            self.local_network.p_state_in[0]: batch.features[0],
+            self.local_network.p_state_in[1]: batch.features[1],
         }
         fetched = sess.run(fetches, feed_dict=feed_dict)
 
@@ -277,7 +277,10 @@ rollout structure.
         policy_rollout = PartialRollout()
 
         rewards,probs,r_features = self.reward_iface.reward_f.reward(batch.si,batch.a,np.zeros((1,256)),np.zeros((1,256)))
-        rewards = rewards[context:,0] #-rewards[context:,1]
+        #rewards = rewards[context:,0] #-rewards[context:,1] # this is if reward is binary.
+        rewards = rewards[context:,np.argmax(batch.a[context:,:])]
+
+
 
         print("Mean injected reward",np.mean(rewards))
         fetched = self.local_network.get_probs(batch.si[:context],np.zeros((1,256)),np.zeros((1,256)))

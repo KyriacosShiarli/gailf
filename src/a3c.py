@@ -38,8 +38,8 @@ should be computed.
             self.adv = tf.placeholder(tf.float32, [None], name="adv")
             self.r = tf.placeholder(tf.float32, [None], name="r")
 
-            log_prob_tf = tf.nn.log_softmax(pi.logits)
-            prob_tf = tf.nn.softmax(pi.logits)
+            log_prob_tf = tf.nn.log_softmax(pi.p_logits)
+            prob_tf = tf.nn.softmax(pi.p_logits)
 
             # the "policy gradients" loss:  its derivative is precisely the policy gradient
             # notice that self.ac is a placeholder that is provided externally.
@@ -51,7 +51,7 @@ should be computed.
             entropy = - tf.reduce_sum(prob_tf * log_prob_tf)
 
             bs = tf.to_float(tf.shape(pi.x)[0])
-            self.loss = pi_loss + 0.5 * vf_loss - entropy * 0.01
+            self.p_loss = pi_loss + 0.5 * vf_loss - entropy * 0.01
 
             # 20 represents the number of "local steps":  the number of timesteps
             # we run the policy before we update the parameters.
@@ -64,9 +64,7 @@ should be computed.
             else:
                 self.runner = RunnerThread(env, pi, 20, visualise)
 
-
-
-            grads = tf.gradients(self.loss, pi.var_list)
+            grads = tf.gradients(self.p_loss, pi.var_list)
 
             if use_tf12_api:
                 tf.summary.scalar("model/policy_loss", pi_loss / bs)
@@ -89,7 +87,7 @@ should be computed.
             grads, _ = tf.clip_by_global_norm(grads, 40.0)
 
             # copy weights from the parameter server to the local model
-            self.sync = tf.group(*[v1.assign(v2) for v1, v2 in zip(pi.var_list, self.network.var_list)])
+            self.p_sync = tf.group(*[v1.assign(v2) for v1, v2 in zip(pi.var_list, self.network.var_list)])
 
             grads_and_vars = list(zip(grads, self.network.var_list))
             inc_step = self.global_step.assign_add(tf.shape(pi.x)[0])
@@ -120,33 +118,37 @@ self explanatory:  take a rollout from the queue of the thread runner.
         """
 process grabs a rollout that's been produced by the thread runner,
 and updates the parameters.  The update is then sent to the parameter
-server. In the gail case we will need to decide wether or not this will need to be saved to same data structure. Hopefully in the same 
+server. In the gail case we will need to decide wether or not this will need to be saved to same data structure. Hopefully in the same
 rollout structure.
 """
+        sess.run(self.p_sync)  # copy weights from shared to local
 
-        sess.run(self.sync)  # copy weights from shared to local
         rollout = self.pull_batch_from_queue()
-        batch = process_rollout(rollout, gamma=0.99, lambda_=1.0)
+
+        batch = process_rollout(rollout, gamma=0.8, lambda_=1.0)
 
         should_compute_summary = self.task == 0 and self.local_steps % 11 == 0
 
         if should_compute_summary:
-            fetches = [self.summary_op, self.train_op, self.global_step]
+            fetches = [self.summary_op, self.p_train_op, self.global_step]
         else:
-            fetches = [self.train_op, self.global_step]
+            fetches = [self.p_train_op, self.global_step]
 
         feed_dict = {
             self.local_network.x: batch.si,
             self.ac: batch.a,
             self.adv: batch.adv,
             self.r: batch.r,
-            self.local_network.state_in[0]: batch.features[0],
-            self.local_network.state_in[1]: batch.features[1],
+            self.local_network.p_state_in[0]: batch.features[0],
+            self.local_network.p_state_in[1]: batch.features[1],
         }
-
         fetched = sess.run(fetches, feed_dict=feed_dict)
 
         if should_compute_summary:
             self.summary_writer.add_summary(tf.Summary.FromString(fetched[0]), fetched[-1])
             self.summary_writer.flush()
+
+        # Update the distctiminator
+        sess = tf.get_default_session()
         self.local_steps += 1
+

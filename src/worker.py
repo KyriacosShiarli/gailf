@@ -7,7 +7,7 @@ import logging
 import sys, signal
 import time
 import os
-from a3c_gail import A3C_gail
+from gail_experimental import A3C_gail
 from a3c import A3C
 from envs import create_env
 import distutils.version
@@ -39,7 +39,7 @@ def run(args, server):
     # Variable names that start with "local" are not saved in checkpoints.
     if use_tf12_api:
         variables_to_save = [v for v in tf.global_variables() if
-                             not (v.name.startswith("policy") or v.name.startswith("rif"))]
+                             not (v.name.startswith("local") or v.name.startswith("rif"))]
         for v in variables_to_save:
             print v.name
         print [v.name for v in tf.global_variables()]
@@ -47,7 +47,7 @@ def run(args, server):
         init_all_op = tf.global_variables_initializer()
     else:
         variables_to_save = [v for v in tf.all_variables() if
-                             not (v.name.startswith("policy") or v.name.startswith("rif"))]
+                             not (v.name.startswith("local") or v.name.startswith("rif"))]
         init_op = tf.initialize_variables(variables_to_save)
         init_all_op = tf.initialize_all_variables()
     saver = FastSaver(variables_to_save)
@@ -56,6 +56,7 @@ def run(args, server):
     logger.info('Trainable vars:')
     for v in var_list:
         logger.info('  %s %s', v.name, v.get_shape())
+
 
     def init_fn(ses):
         logger.info("Initializing all parameters.")
@@ -89,7 +90,7 @@ def run(args, server):
         "One common cause is that the parameter server DNS name isn't resolving yet, or is misspecified.")
     with sv.managed_session(server.target, config=config) as sess, sess.as_default():
         sess.run(trainer.sync)
-        sess.run(trainer.reward_iface.sync)
+        #sess.run(trainer.reward_iface.sync)
         trainer.start(sess, summary_writer)
         global_step = sess.run(trainer.global_step)
         print "GLOBAL STEPS", global_step
