@@ -36,8 +36,11 @@ def conv2d(x, num_filters, name, filter_size=(3, 3), stride=(1, 1), pad="SAME", 
                             collections=collections)
         return tf.nn.conv2d(x, w, stride_shape, pad) + b
 
-def linear(x, size, name, initializer=None, bias_init=0):
-    w = tf.get_variable(name + "/w", [x.get_shape()[1], size], initializer=initializer)
+def linear(x, size, name, initializer=None, bias_init=0,indim = None):
+    if indim is None:
+        w = tf.get_variable(name + "/w", [x.get_shape()[1], size], initializer=initializer)
+    else:
+        w = tf.get_variable(name + "/w", [indim, size], initializer=initializer)
     b = tf.get_variable(name + "/b", [size], initializer=tf.constant_initializer(bias_init))
     return tf.matmul(x, w) + b
 
@@ -178,13 +181,30 @@ class LSTMDiscriminator(LSMTAbstract):
                         {self.x: ob, self.r_state_in[0]: c, self.r_state_in[1]: h})
 
 class CONVDiscriminator(object):
-    def __init__(self, ob_space, ac_space):
-        self.size = 4 # memory size in the input
-        self.do = 0.3
-        self.ob_space = ob_space
-        self.ac_space = ac_space
-        self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space[:-1]) + [self.size])
-        for i in range(4):
-            x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
-        # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
-        self.conv_out = flatten(x)
+    def __init__(self, ob_space, ac_space,do = 0.3,mem_size = 4):
+        with tf.variable_scope('reward'):
+            self.mem_size = mem_size # memory size in the input
+            self.do =do
+            self.keep_prob = tf.placeholder(tf.float32, shape=[])
+            self.ob_space = ob_space
+            self.ac_space = ac_space
+            self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space[:-1]) + [self.mem_size])
+            for i in range(4):
+                x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
+            # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
+            self.conv_out = flatten(x)
+            x = tf.nn.dropout(self.conv_out,self.keep_prob)
+            x = tf.nn.elu(linear(x,256,"fc1",normalized_columns_initializer(0.01)))
+            self.r_logits = linear(x, self.ac_space,"actions", normalized_columns_initializer(0.01))
+            eps = tf.constant(1e-5)
+            self.d = tf.nn.softmax(self.r_logits)
+            self.rew = tf.log(self.d + eps)
+            self.rew_norm = self.rew / 1 + 1.8  # (-tf.log(eps))
+            self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, tf.get_variable_scope().name)
+
+    def reward(self, ob):
+        sess = tf.get_default_session()
+        # CAlling this function is not training so keep probability is 0
+        return sess.run([self.rew_norm, self.d],{self.x: ob,self.keep_prob:1.0})
+
+

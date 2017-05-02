@@ -1,10 +1,10 @@
 from __future__ import print_function
 import tensorflow as tf
-from model import LSTMImitator,LSTMDiscriminator,LSTMPolicy
+from model import LSTMImitator,LSTMDiscriminator,LSTMPolicy,CONVDiscriminator
 import six.moves.queue as queue
 from collections import deque
 import distutils.version
-from helpers import process_rollout, process_irl_rollout,PartialRollout
+from helpers import process_rollout, process_irl_rollout,PartialRollout,process_conv_rollout
 use_tf12_api = distutils.version.LooseVersion(tf.VERSION) >= distutils.version.LooseVersion('0.12.0')
 from runner import RunnerThread
 import pickle
@@ -27,10 +27,13 @@ should be computed.
         self.data_manager= DemonstrationManager("./dummy_path")
         self.data_manager.trajectories = data
         worker_device = "/job:worker/task:{}/cpu:0".format(task)
-        self.context_size = 40 # Context size for reward function updates
-        self.num_local_steps = 200 ##local steps before policy update.
+        self.context_size = 0 # Context size for reward function updates
+        self.num_local_steps = 100 ##local steps before policy update.
         self.rollout_history = deque([],maxlen=2000)
         self.pretrain = True
+        self.plr_init = 5e-7
+        self.plr_max = 4e-5
+        self.rlr = 1e-4
 
         with tf.device(tf.train.replica_device_setter(1, worker_device=worker_device)):
             with tf.variable_scope("global"):
@@ -38,7 +41,7 @@ should be computed.
                     self.network =self.r_network = LSTMImitator(env.observation_space.shape, env.action_space.n)
                 else:
                     self.network =LSTMPolicy(env.observation_space.shape, env.action_space.n)
-                    self.r_network = LSTMDiscriminator(env.observation_space.shape, env.action_space.n)
+                    self.r_network = CONVDiscriminator(env.observation_space.shape, env.action_space.n)
                 self.global_step = tf.get_variable("global_step", [], tf.int32,
                                                    initializer=tf.constant_initializer(0, dtype=tf.int32),
                                                    trainable=False)
@@ -48,13 +51,14 @@ should be computed.
                     self.local_network = self.reward_f = pi = LSTMImitator(env.observation_space.shape, env.action_space.n)
                 else:
                     self.local_network= pi = LSTMPolicy(env.observation_space.shape, env.action_space.n)
-                    self.reward_f = LSTMDiscriminator(env.observation_space.shape, env.action_space.n)
+                    self.reward_f = CONVDiscriminator(env.observation_space.shape, env.action_space.n)
                 pi.global_step = self.global_step
 
             ####################### COMMON OPS ###################################333
             self.ac = tf.placeholder(tf.float32, [None, env.action_space.n], name="ac")
             self.adv = tf.placeholder(tf.float32, [None], name="adv")
             self.r = tf.placeholder(tf.float32, [None], name="r")
+            self.plr = tf.placeholder(tf.float32, shape=[])
 
             inc_step = self.global_step.assign_add(tf.shape(pi.x)[0])
             # copy weights from the parameter server to the local model
@@ -83,7 +87,7 @@ should be computed.
             p_grads_clipped, _ = tf.clip_by_global_norm(p_grads, 40.0)
             p_grads_and_vars = list(zip(p_grads_clipped, self.network.var_list))
             # each worker has a different set of adam optimizer parameters
-            p_opt = tf.train.AdamOptimizer(2e-4)
+            p_opt = tf.train.AdamOptimizer(self.plr)
             self.p_train_op = tf.group(p_opt.apply_gradients(p_grads_and_vars), inc_step)
 
             ################################ Reward Ops ####################################################
@@ -97,7 +101,7 @@ should be computed.
             r_grads = tf.gradients(self.r_loss_trunc, self.reward_f.var_list)
             r_grads_clipped, _ = tf.clip_by_global_norm(r_grads, 40.0)
             r_grads_and_vars = list(zip(r_grads_clipped, self.r_network.var_list))
-            r_opt = tf.train.AdamOptimizer(5e-5)
+            r_opt = tf.train.AdamOptimizer(self.rlr)
             self.r_train_op = r_opt.apply_gradients(r_grads_and_vars)
 
             bs = 1
@@ -162,7 +166,7 @@ rollout structure.
         else:
             rollout = self.pull_batch_from_queue()
 
-        batch = process_rollout(rollout, gamma=0.8, lambda_=1.0)
+        batch = process_rollout(rollout, gamma=0.95, lambda_=1.0)
 
         should_compute_summary = self.task == 0 and self.local_steps % 11 == 0
 
@@ -178,17 +182,20 @@ rollout structure.
             self.r: batch.r,
             self.local_network.p_state_in[0]: batch.features[0],
             self.local_network.p_state_in[1]: batch.features[1],
+            self.plr: self.plr_init
         }
         fetched = sess.run(fetches, feed_dict=feed_dict)
 
         if should_compute_summary:
             self.summary_writer.add_summary(tf.Summary.FromString(fetched[0]), fetched[-1])
             self.summary_writer.flush()
-
+        if self.plr_init<self.plr_max:
+            self.plr_init*=1.0004
+        print(self.plr_init)
         # Update the distctiminator
         sess = tf.get_default_session()
         if not inject:
-            self.train_reward(sess,rollout)
+            self.train_conv(sess,rollout)
         self.local_steps += 1
         return rollout
 
@@ -302,5 +309,70 @@ rollout structure.
         self.pretrain = False
 
 
+    def train_conv(self, sess, rollout):
+        # the rollout here is the rollout used from the policy gradient method and passed on to the discriminator.
+        # This training function is still quite basic and does not really do any batching appart from taking a full
+        # trajectory. It would be nice to implement a batch version of the discriminator however. Shouldnt take much time.
+
+        if len(rollout.actions)>10:
+            self.rollout_history.append(rollout)
+        # if len(self.rollout_history)<2:
+
+        idx = np.random.randint(0, len(self.rollout_history))
+        # idx = 0
+
+        r_rollout = self.rollout_history[idx]
+
+        label_epsilon = 0.01
+        sess.run(self.r_sync)
+        batch_a = process_conv_rollout(r_rollout,mem_size=4)
+
+        data_e = self.data_manager.get(number=1., length=batch_a.si.shape[0])
+        batch_e = process_conv_rollout(data_e[0],mem_size=4)  # TODO: FOR NOW THIS ONLY TAKES ONE ROLLOUT
+        if self.pretrain is True:
+            train_repeat= 200
+        else:
+            train_repeat = 1
+        for _ in range(train_repeat):
+            # y_a = np.repeat(np.array([[label_epsilon, 1. - label_epsilon]], dtype=np.float32), batch_a.si.shape[0], axis=0)
+            # y_e = np.repeat(np.array([[1. - label_epsilon, label_epsilon]], dtype=np.float32), batch_e.si.shape[0], axis=0)
+
+            n_actions = batch_a.a.shape[1]
+            eps = 0  # label_epsilon/(n_actions-1)
+            y_a = np.ones((batch_a.si.shape[0], n_actions)) / (float(n_actions))
+            # y_a[range(batch_a.si.shape[0]),np.argmax(batch_a.a,axis = 1)] = 0
+            # y_a = np.repeat(np.array([[label_epsilon, 1. - label_epsilon]], dtype=np.float32), batch_a.si.shape[0], axis=0)
+
+            # y_a = np.repeat(np.array([[label_epsilon, 1. - label_epsilon]], dtype=np.float32), batch_a.si.shape[0], axis=0)
+            # y_e = np.repeat(np.array([[1. - label_epsilon, label_epsilon]], dtype=np.float32), batch_e.si.shape[0], axis=0)
+
+            y_e = eps * np.ones((batch_e.si.shape[0], n_actions))
+            y_e[range(batch_e.si.shape[0]), np.argmax(batch_e.a, axis=1)] = 1  # -label_epsilon
+
+            feed_dict_a = {
+                self.reward_f.x: batch_a.si,
+                # self.reward_f.action: batch_a.a,
+                self.reward_f.keep_prob: self.reward_f.do,
+                self.label: y_a,
+            }
+
+            feed_dict_e = {
+                self.reward_f.x: batch_e.si,
+                # self.reward_f.action: batch_e.a,
+                self.reward_f.keep_prob : self.reward_f.do,
+                self.label: y_e,
+            }
+            fetches = [self.r_train_op, self.r_loss_trunc, self.r_loss]
+            _, loss_trunc_a, loss = sess.run(fetches, feed_dict=feed_dict_a)
+            _, loss_trunc_e, loss_e = sess.run(fetches, feed_dict=feed_dict_e)
+            summary = tf.Summary()
+            summary.value.add(tag="discriminator/loss", simple_value=np.mean([loss_trunc_a, loss_trunc_e]))
+            self.summary_writer.add_summary(summary, self.local_steps)
+            self.summary_writer.flush()
+            print("LOSES", loss_trunc_a, loss_trunc_e)
+            # print("first_losses")
+            # print("last_losses")
+            sess.run(self.r_sync)
+        self.pretrain = False
 
 
