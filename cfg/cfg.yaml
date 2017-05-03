@@ -1,0 +1,11 @@
+rlr : 1e-5
+plr_init : 1e-7
+local_steps : 100
+plr_inc : 1.004
+plr_max : 4e-5
+rollout_history : 20000
+dropout : 0.3
+local_steps : 100
+gamma : 0.95
+grad_clip : 40.0
+pretrain_steps : 1

@@ -208,3 +208,27 @@ class CONVDiscriminator(object):
         return sess.run([self.rew_norm, self.d],{self.x: ob,self.keep_prob:1.0})
 
 
+class CONVPolicy(object):
+    def __init__(self, ob_space, ac_space,do = 0.3,mem_size = 4):
+        with tf.variable_scope('policy'):
+            self.mem_size = mem_size # memory size in the input
+            self.do =do
+            self.keep_prob = tf.placeholder(tf.float32, shape=[])
+            self.ob_space = ob_space
+            self.ac_space = ac_space
+            self.x = x = tf.placeholder(tf.float32, [None] + list(ob_space[:-1]) + [self.mem_size])
+            for i in range(4):
+                x = tf.nn.elu(conv2d(x, 32, "l{}".format(i + 1), [3, 3], [2, 2]))
+            # introduce a "fake" batch dimension of 1 after flatten so that we can do LSTM over time dim
+            self.conv_out = flatten(x)
+            x = tf.nn.dropout(self.conv_out,self.keep_prob)
+            x = tf.nn.elu(linear(x,256,"fc1",normalized_columns_initializer(0.01)))
+            self.p_logits = linear(x, self.ac_space, "action", normalized_columns_initializer(0.01))
+            self.probs = tf.nn.softmax(self.p_logits, name='action_probs')
+            self.vf = tf.reshape(linear(x, 1, "value", normalized_columns_initializer(1.0)), [-1])
+            self.sample = categorical_sample(self.p_logits, self.ac_space)[0, :]
+    def reward(self, ob):
+        sess = tf.get_default_session()
+        # CAlling this function is not training so keep probability is 0
+        return sess.run([self.rew_norm, self.d],{self.x: ob,self.keep_prob:1.0})
+

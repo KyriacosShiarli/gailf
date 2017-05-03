@@ -11,6 +11,9 @@ from gail_experimental import A3C_gail
 from a3c import A3C
 from envs import create_env
 import distutils.version
+import os
+import yaml
+from helpers import mkdir
 
 use_tf12_api = distutils.version.LooseVersion(tf.VERSION) >= distutils.version.LooseVersion('0.12.0')
 import pdb
@@ -32,7 +35,15 @@ def run(args, server):
     print "ARguement", args.demonstrations
     print "Logig", args.demonstrations==None
     if args.demonstrations is not (None or False):
-        trainer = A3C_gail(env, args.task, args.visualise, args.demonstrations)
+        cfg_dir = args.log_dir +'/cfg.yaml'
+        if os.path.exists(cfg_dir):
+            pass
+        else:
+            cfg_dir = '../cfg/cfg.yaml'
+        with open(cfg_dir, 'r+') as handle:
+            cfg = yaml.load(handle)  # Data is in the form of a demonstration manager defined in another class.
+            # if the path already exists load the cfg file in there.
+        trainer = A3C_gail(env, args.task, args.visualise, args.demonstrations,cfg = cfg)
     else:
         trainer = A3C(env, args.task, args.visualise, record = args.record)
 
@@ -63,6 +74,7 @@ def run(args, server):
         ses.run(init_all_op)
 
     config = tf.ConfigProto(device_filters=["/job:ps", "/job:worker/task:{}/cpu:0".format(args.task)])
+
     logdir = os.path.join(args.log_dir, 'train')
 
     if use_tf12_api:
@@ -88,6 +100,17 @@ def run(args, server):
     logger.info(
         "Starting session. If this hangs, we're mostly likely waiting to connect to the parameter server. " +
         "One common cause is that the parameter server DNS name isn't resolving yet, or is misspecified.")
+
+
+    # Make the cfg history directory.
+    mkdir(args.log_dir+'/cfg_hist')
+    # save the cfg file used durign this restart of the training. One can change the main cfg file from the training directory. Nohting will be lost.
+    hist_dir = args.log_dir+'/cfg_hist/'
+    count = len([name for name in os.listdir(hist_dir) if os.path.isfile(name)])
+    with open(hist_dir + "cfg_"+str(count)+".yaml", 'w+') as handle:
+        yaml.dump(cfg,handle)
+
+
     with sv.managed_session(server.target, config=config) as sess, sess.as_default():
         sess.run(trainer.sync)
         #sess.run(trainer.reward_iface.sync)

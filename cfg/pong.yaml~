@@ -1,0 +1,7 @@
+rlr: 1e-5
+plr_init: 1e-7
+plr_inc : 1.004
+rollout_history: 20000
+dropout: 0.3
+local_steps: 100
+gamma: 0.95

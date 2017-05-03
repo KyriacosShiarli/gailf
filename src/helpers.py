@@ -2,11 +2,20 @@ import scipy.signal
 import numpy as np
 from collections import namedtuple
 import pdb
+import os
 Batch = namedtuple("Batch", ["si", "a", "adv", "r", "terminal", "features"])
 IRL_Batch = namedtuple("IRL_Batch", ["si", "a",'features'])
 
 def discount(x, gamma):
     return scipy.signal.lfilter([1], [1, -gamma], x[::-1], axis=0)[::-1]
+
+def mkdir(dir):
+    if os.path.exists(dir):
+        return 0
+    else:
+        os.mkdir(dir)
+
+
 
 def process_rollout(rollout, gamma, lambda_=1.0):
     """
