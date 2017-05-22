@@ -88,13 +88,14 @@ should be computed.
 
             # copy weights from the parameter server to the local model
             self.p_sync = tf.group(*[v1.assign(v2) for v1, v2 in zip(pi.var_list, self.network.var_list)])
+            self.sync = self.p_sync
 
             grads_and_vars = list(zip(grads, self.network.var_list))
             inc_step = self.global_step.assign_add(tf.shape(pi.x)[0])
 
             # each worker has a different set of adam optimizer parameters
             opt = tf.train.AdamOptimizer(1e-4)
-            self.train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
+            self.p_train_op = tf.group(opt.apply_gradients(grads_and_vars), inc_step)
             self.summary_writer = None
             self.local_steps = 0
 
@@ -125,7 +126,7 @@ rollout structure.
 
         rollout = self.pull_batch_from_queue()
 
-        batch = process_rollout(rollout, gamma=0.8, lambda_=1.0)
+        batch = process_rollout(rollout, gamma=0.99, lambda_=1.0)
 
         should_compute_summary = self.task == 0 and self.local_steps % 11 == 0
 

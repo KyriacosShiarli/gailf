@@ -1,11 +1,18 @@
 rlr : 1e-5
-plr_init : 1e-7
+plr_init : 1e-6
 local_steps : 100
-plr_inc : 1.004
-plr_max : 4e-5
-rollout_history : 20000
-dropout : 0.3
+plr_inc : 1.0004
+plr_max : 5e-5
+rollout_history : 6000
+dropout : 0.2
 local_steps : 100
-gamma : 0.95
+gamma : 0.99
 grad_clip : 40.0
-pretrain_steps : 1
+pretrain_steps : 200
+failure : 1
+policy_type : lstm
+reward_type : conv
+shared : 0
+lambda : 0.9
+reward_form : binary_prob
+dtau: 0.01

@@ -51,6 +51,20 @@ class DemonstrationManager(object):
                 self.trajectories[np.argmin(stored_avg)] = rollout
         if self.counter > 100:
             self.save()
+
+    def append_to_worst(self,rollout):
+        print "Demonstration manager coutner incremented.",self.counter
+        self.counter+=1
+        if len(self.trajectories)<self.max_size:
+            self.trajectories.append(rollout)
+        else:
+            reward_avg = np.mean(rollout.rewards)
+            stored_avg = [np.mean(rol.rewards) for rol in self.trajectories]
+            print "STORED AVERAGE REWARDS",stored_avg
+            if reward_avg<np.amax(stored_avg):
+                self.trajectories[np.argmax(stored_avg)] = rollout
+        if self.counter > 100:
+            self.save()
     def save(self):
         with open(self.base_filename + ".pkl", 'wb') as handle:
             pickle.dump(self.trajectories, handle)
