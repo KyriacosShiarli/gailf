@@ -9,10 +9,10 @@ local_steps : 100
 gamma : 0.99
 grad_clip : 40.0
 pretrain_steps : 200
-failure : 1
+failure : 0
 policy_type : lstm
 reward_type : conv
 shared : 0
 lambda : 0.9
 reward_form : binary_prob
-dtau: 0.01
+dtau: 1.

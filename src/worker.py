@@ -95,7 +95,7 @@ def run(args, server):
                              save_model_secs=30,
                              save_summaries_secs=30)
 
-    num_global_steps = 100000000
+    num_global_steps = 53348207
 
     logger.info(
         "Starting session. If this hangs, we're mostly likely waiting to connect to the parameter server. " +
@@ -120,12 +120,12 @@ def run(args, server):
         logger.info("Starting training at step=%d", global_step)
         while not sv.should_stop() and (not num_global_steps or global_step < num_global_steps):
             rollout = trainer.process(sess)
-            # reward_iface.train(sess,rollout)
             global_step = sess.run(trainer.global_step)
 
     # Ask for all the services to stop.
     sv.stop()
     logger.info('reached %s steps. worker stopped.', global_step)
+    os.system("tmux kill-session")
 
 
 def cluster_spec(num_workers, num_ps):
