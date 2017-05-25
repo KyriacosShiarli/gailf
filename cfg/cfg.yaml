@@ -1,5 +1,5 @@
 rlr : 1e-5
-plr_init : 1e-6
+plr_init : 1e-5
 local_steps : 100
 plr_inc : 1.0004
 plr_max : 5e-5
