@@ -40,6 +40,7 @@ should be computed.
         self.plr_inc = cfg["plr_inc"] if cfg is not None else 1.0004
         self.rlr = float(cfg["rlr"] if cfg is not None else 1e-4)
         self.p_loss_weights = {"policy":0.8,"value":1.,"entropy":0.01}
+        self.dropout = cfg["dropout"] if cfg is not None else 0.7
         self.gamma = cfg["gamma"] if cfg is not None else 0.95
         self.grad_clip = cfg["grad_clip"] if cfg is not None else 40.
         self.lambda_ = cfg["lambda"] if cfg is not None else 0.9
@@ -65,7 +66,7 @@ should be computed.
                     self.network =self.r_network = LSTMImitator(env.observation_space.shape, env.action_space.n)
                 else:
                     self.network =models["policy_"+self.policy_type](env.observation_space.shape, env.action_space.n)
-                    self.r_network = models["reward_"+self.reward_type](env.observation_space.shape, env.action_space.n,
+                    self.r_network = models["reward_"+self.reward_type](env.observation_space.shape, env.action_space.n,do = self.dropout,
                                                                         reward_form = self.reward_form,failure = self.failure)
                 self.global_step = tf.get_variable("global_step", [], tf.int32,
                                                    initializer=tf.constant_initializer(0, dtype=tf.int32),
@@ -76,7 +77,7 @@ should be computed.
                     self.local_network = self.reward_f = pi = LSTMImitator(env.observation_space.shape, env.action_space.n)
                 else:
                     self.local_network= pi = models["policy_"+self.policy_type](env.observation_space.shape, env.action_space.n)
-                    self.reward_f = models["reward_"+self.reward_type](env.observation_space.shape, env.action_space.n,
+                    self.reward_f = models["reward_"+self.reward_type](env.observation_space.shape, env.action_space.n,do = self.dropout,
                                                                        reward_form = self.reward_form,failure = self.failure)
                 pi.global_step = self.global_step
 
