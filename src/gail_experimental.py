@@ -12,7 +12,7 @@ import yaml
 import pdb
 from demonstration_manager import DemonstrationManager
 import numpy as np
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 class A3C_gail(object):
     def __init__(self, env, task, visualise,data_path, cfg = None):
