@@ -103,14 +103,14 @@ def run(args, server):
         "Starting session. If this hangs, we're mostly likely waiting to connect to the parameter server. " +
         "One common cause is that the parameter server DNS name isn't resolving yet, or is misspecified.")
 
-
-    #Make the cfg history directory.
-    mkdir(args.log_dir+'/cfg_hist')
-    # # save the cfg file used durign this restart of the training. One can change the main cfg file from the training directory. Nohting will be lost.
-    hist_dir = args.log_dir+'/cfg_hist/'
-    count = len([name for name in os.listdir(hist_dir) if os.path.isfile(name)])
-    with open(hist_dir + "cfg_"+str(count)+".yaml", 'w+') as handle:
-         yaml.dump(cfg,handle)
+    if args.cfg is not (None or False):
+        #Make the cfg history directory.
+        mkdir(args.log_dir+'/cfg_hist')
+        # # save the cfg file used durign this restart of the training. One can change the main cfg file from the training directory. Nohting will be lost.
+        hist_dir = args.log_dir+'/cfg_hist/'
+        count = len([name for name in os.listdir(hist_dir) if os.path.isfile(name)])
+        with open(hist_dir + "cfg_"+str(count)+".yaml", 'w+') as handle:
+             yaml.dump(cfg,handle)
 
 
     with sv.managed_session(server.target, config=config) as sess, sess.as_default():
