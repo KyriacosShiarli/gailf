@@ -15,7 +15,7 @@ import numpy as np
 #import matplotlib.pyplot as plt
 
 class A3C_gail(object):
-    def __init__(self, env, task, visualise,data_path, cfg = None):
+    def __init__(self, env, task, visualise, cfg):
         """
 An implementation of the A3C algorithm that is reasonably well-tuned for the VNC environments.
 Below, we will have a modest amount of complexity due to the way TensorFlow handles data parallelism.
@@ -24,7 +24,7 @@ should be computed.
 """
         self.env = env
         self.task = task
-        with open(data_path + ".pkl", 'r+') as handle:
+        with open(cfg['demonstrations'] + ".pkl", 'r+') as handle:
             data = pickle.load(handle) # Data is in the form of a demonstration manager defined in another class.
         self.data_manager= DemonstrationManager("./dummy_path")
         self.data_manager.trajectories = data
@@ -32,30 +32,31 @@ should be computed.
         self.context_size = 0 # Context size for reward function updates
         self.failure = bool(cfg['failure'] if cfg is not None else False)
         self.num_local_steps = cfg['local_steps'] if cfg is not None else 100 ##local steps before policy update.
-        self.rollout_history = deque([],maxlen=cfg["rollout_history"] if cfg is not None else 20000)
-        self.pretrain_steps =cfg["pretrain_steps"] if cfg is not None else 100
+        self.rollout_history = deque([],maxlen=cfg["rollout_history"] if cfg.has_key('rollout_history') else 20000)
+        self.pretrain_steps =cfg["pretrain_steps"] if cfg.has_key("pretrain_steps") else 100
         self.pretrain = False if self.pretrain_steps < 2 else True
-        self.plr_init = float(cfg["plr_init"] if cfg is not None else 4e-5)
-        self.plr_max = float(cfg["plr_max"] if cfg is not None else 4e-5)
-        self.plr_inc = cfg["plr_inc"] if cfg is not None else 1.0004
-        self.rlr = float(cfg["rlr"] if cfg is not None else 1e-4)
+        self.plr_init = float(cfg["plr_init"] if cfg.has_key('plt_init') else 4e-5)
+        self.plr_max = float(cfg["plr_max"] if cfg.has_key('plr_max') else 4e-5)
+        self.plr_inc = cfg["plr_inc"] if cfg.has_key('plr_inc') else 1.0004
+        self.rlr = float(cfg["rlr"] if cfg.has_key('rlr') else 1e-4)
         self.p_loss_weights = {"policy":0.8,"value":1.,"entropy":0.01}
-        self.dropout = cfg["dropout"] if cfg is not None else 0.7
-        self.gamma = cfg["gamma"] if cfg is not None else 0.95
-        self.grad_clip = cfg["grad_clip"] if cfg is not None else 40.
-        self.lambda_ = cfg["lambda"] if cfg is not None else 0.9
-        self.policy_type = cfg["policy_type"] if cfg is not None else 'lstm'
-        self.reward_type = cfg["reward_type"] if cfg is not None else 'conv'
-        self.shared = cfg["shared"] if cfg is not None else False
-        self.reward_form = cfg['reward_form'] if cfg is not None else 'action'
-        self.dtau = cfg['dtau'] if cfg is not None else 0.01
+        self.dropout = cfg["dropout"] if cfg.has_key('dropout') else 0.7
+        self.gamma = cfg["gamma"] if cfg.has_key('gamma') else 0.95
+        self.grad_clip = cfg["grad_clip"] if cfg.has_key('grad_clip') else 40.
+        self.lambda_ = cfg["lambda"] if cfg.has_key('lambda') else 0.9
+        self.policy_type = cfg["policy_type"] if cfg.has_key('policy_type') else 'lstm'
+        self.reward_type = cfg["reward_type"] if cfg.has_key('reward_type') else 'conv'
+        self.shared = cfg["shared"] if cfg.has_key('shared') else False
+        self.reward_form = cfg['reward_form'] if cfg.has_key('reward_form') else 'action'
+        self.enemy_learning = bool(cfg['enemy_learning']) if cfg.has_key('enemy_learning') else False
+        self.dtau = cfg['dtau'] if cfg.has_key('dtau') is not None else 0.01
 
         models = {"policy_lstm":LSTMPolicy,"policy_conv":CONVPolicy,
                   "reward_conv":CONVDiscriminator,"reward_lstm":LSTMDiscriminator,
                   "shared_conv": LSTMImitator, "shared_lstm": LSTMImitator}
 
         if self.failure is True:
-            with open(data_path + "_failure.pkl", 'r+') as handle:
+            with open(cfg['demonstrations'] + "_failure.pkl", 'r+') as handle:
                 f_data = pickle.load(handle) # Data is in the form of a demonstration manager defined in another class.
             self.data_manager_f = DemonstrationManager("./dummy_path")
             self.data_manager_f.trajectories = f_data
@@ -110,7 +111,7 @@ should be computed.
             # on the one hand;  but on the other hand, we get less frequent parameter updates, which
             # slows down learning.  In this code, we found that making local steps be much
             # smaller than 20 makes the algorithm more difficult to tune and to get to work.
-            self.runner = RunnerThread(env, pi, self.num_local_steps, visualise, reward_f=self.reward_f,shared=self.shared)
+            self.runner = RunnerThread(env, pi, self.num_local_steps, visualise, reward_f=self.reward_f,shared=self.shared, enemy=self.enemy_learning)
             p_grads = tf.gradients(self.p_loss, pi.var_list)
             p_grads_clipped, _ = tf.clip_by_global_norm(p_grads, self.grad_clip)
             p_grads_and_vars = list(zip(p_grads_clipped, self.network.var_list))
@@ -267,25 +268,29 @@ rollout structure.
 
         r_rollout = self.rollout_history[idx]
 
+
         label_epsilon = 0.01
         if self.local_steps == 0:
             sess.run(self.r_sync)
         else:
             sess.run(self.r_sync_soft)
 
-
-        data_e = self.data_manager.get(number=1., length=len(r_rollout.states))
+        if self.enemy_learning:
+            idx2 = np.random.randint(0, len(self.rollout_history))
+            data_e = self.rollout_history[idx]
+        else:
+            data_e = self.data_manager.get(number=1., length=len(r_rollout.states))[0]
 
         if self.reward_type =='conv':
             batch_a = process_conv_rollout(r_rollout,mem_size = self.reward_f.mem_size)
-            batch_e = process_conv_rollout(data_e[0],mem_size=self.reward_f.mem_size)  # TODO: FOR NOW THIS ONLY TAKES ONE ROLLOUT
+            batch_e = process_conv_rollout(data_e,mem_size=self.reward_f.mem_size,reverse = self.enemy_learning)
             if self.failure:
                 data_f = self.data_manager_f.get(number=1., length=len(r_rollout.states))
                 batch_f = process_conv_rollout(data_f[0],
                                                mem_size=self.reward_f.mem_size)
         elif self.reward_type =='lstm':
             batch_a = process_irl_rollout(r_rollout)
-            batch_e = process_irl_rollout(data_e[0])  # TODO: FOR NOW THIS ONLY TAKES ONE ROLLOUT
+            batch_e = process_irl_rollout(data_e[0])
 
         if self.pretrain is True:
             train_repeat = self.pretrain_steps
@@ -318,8 +323,9 @@ rollout structure.
                     y_e = np.repeat(np.array([[1. - label_epsilon, label_epsilon]], dtype=np.float32),
                                     batch_e.si.shape[0], axis=0)
                     s = np.vstack([batch_a.si,batch_e.si])
-                    a = np.vstack([batch_a.a, batch_e.a])
+                    a = np.vstack([batch_a.a, batch_e.a])*0 if self.enemy_learning else np.vstack([batch_a.a, batch_e.a])
                     y = np.vstack([y_a,y_e])
+
 
             if self.reward_type =='conv':
                 feed_dict = {

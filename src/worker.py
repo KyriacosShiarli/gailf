@@ -32,10 +32,9 @@ class FastSaver(tf.train.Saver):
 
 def run(args, server):
     env = create_env(args.env_id, client_id=str(args.task), remotes=args.remotes)
-    print "ARguement", args.demonstrations
-    print "Logig", args.demonstrations==None
-    if args.demonstrations is not (None or False):
-        cfg_dir = args.log_dir +'/cfg.yaml'
+    if args.cfg is not (None or False):
+        # load the configuration filew
+        cfg_dir = args.cfg +'.yaml'
         if os.path.exists(cfg_dir):
             pass
         else:
@@ -43,7 +42,10 @@ def run(args, server):
         with open(cfg_dir, 'r+') as handle:
             cfg = yaml.load(handle)  # Data is in the form of a demonstration manager defined in another class.
             # if the path already exists load the cfg file in there.
-        trainer = A3C_gail(env, args.task, args.visualise, args.demonstrations,cfg = cfg)
+        if cfg['demonstrations']!='None':
+            trainer = A3C_gail(env, args.task, args.visualise, cfg)
+        else:
+            trainer = A3C(env, args.task, args.visualise, record=args.record)
     else:
         trainer = A3C(env, args.task, args.visualise, record = args.record)
 
@@ -102,13 +104,13 @@ def run(args, server):
         "One common cause is that the parameter server DNS name isn't resolving yet, or is misspecified.")
 
 
-    # Make the cfg history directory.
-    # mkdir(args.log_dir+'/cfg_hist')
+    #Make the cfg history directory.
+    mkdir(args.log_dir+'/cfg_hist')
     # # save the cfg file used durign this restart of the training. One can change the main cfg file from the training directory. Nohting will be lost.
-    # hist_dir = args.log_dir+'/cfg_hist/'
-    # count = len([name for name in os.listdir(hist_dir) if os.path.isfile(name)])
-    # with open(hist_dir + "cfg_"+str(count)+".yaml", 'w+') as handle:
-    #     yaml.dump(cfg,handle)
+    hist_dir = args.log_dir+'/cfg_hist/'
+    count = len([name for name in os.listdir(hist_dir) if os.path.isfile(name)])
+    with open(hist_dir + "cfg_"+str(count)+".yaml", 'w+') as handle:
+         yaml.dump(cfg,handle)
 
 
     with sv.managed_session(server.target, config=config) as sess, sess.as_default():
@@ -162,7 +164,7 @@ Setting up Tensorflow for data parallel work
     parser.add_argument('--num-workers', default=1, type=int, help='Number of workers')
     parser.add_argument('--log-dir', default="/tmp/pong", help='Log directory path')
     parser.add_argument('--env-id', default="PongDeterministic-v3", help='Environment id')
-    parser.add_argument('--demonstrations', type=str, default=False, help='Demonstrations path')
+    parser.add_argument('--cfg', type=str, default=False, help='configuration path')
     parser.add_argument('--record', action='store_true', default=False, help='Recording of trajectories enabled. '
                                                                              'If a demonstration path exists no recording takes place')
     parser.add_argument('-r', '--remotes', default=None,

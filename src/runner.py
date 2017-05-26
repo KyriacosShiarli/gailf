@@ -13,7 +13,7 @@ One of the key distinctions between a normal environment and a universe environm
 is that a universe environment is _real time_.  This means that there should be a thread
 that would constantly interact with the environment and tell it what to do.  This thread is here.
 """
-    def __init__(self, env, policy, num_local_steps, visualise, reward_f = None,record = False,shared=False):
+    def __init__(self, env, policy, num_local_steps, visualise, reward_f = None,record = False,shared=False,enemy = False):
         threading.Thread.__init__(self)
         self.record = record
         self.queue = queue.Queue(5)
@@ -24,6 +24,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
         self.daemon = True
         self.sess = None
         self.shared=shared
+        self.same_colours = enemy
 
         self.summary_writer = None
         self.visualise = visualise
@@ -114,6 +115,9 @@ that would constantly interact with the environment and tell it what to do.  Thi
 
                 # argmax to convert from one-hot
                 state, reward, terminal, info = self.env.step(action.argmax())
+                if self.same_colours:
+                    wh = np.where(state > np.amin(state))
+                    state[wh[0], wh[1]] = 0.6
                 actual_reward = reward
                 if self.visualise:
                     self.env.render()
@@ -197,6 +201,7 @@ def recording_runner(env, policy, num_local_steps, summary_writer, render):
     """
     A thread runner that records the best and worse trajectories of the thread
     """
+    recorder_failure = DemonstrationManager("../data/pong/demonstrations")
     recorder = DemonstrationManager("../data/pong/demonstrations_failure")
     last_state = env.reset()
     last_features = policy.get_initial_features()
@@ -240,7 +245,8 @@ def recording_runner(env, policy, num_local_steps, summary_writer, render):
                     last_state = env.reset()
                 last_features = policy.get_initial_features()
                 print("Episode finished. Sum of rewards: %d. Length: %d" % (rewards, length))
-                recorder.append_to_worst(demonstration)
+                recorder.append_to_best(demonstration)
+                recorder_failure.append_to_worst(demonstration)
                 demonstration = PartialRollout()
                 length = 0
                 rewards = 0

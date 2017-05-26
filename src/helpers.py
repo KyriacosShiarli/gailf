@@ -69,7 +69,7 @@ given a rollout, compute its returns and the advantage
         features = None
     return IRL_Batch(batch_si, batch_a,features)
 
-def process_conv_rollout(rollout,mem_size=4):
+def process_conv_rollout(rollout,mem_size=4,reverse = False):
     # process the rollout such that the right amount of memory is used.
     # you basically need a batch of [batch_size,width,height,mem_size] to go into the network.
     batch_si = []
@@ -77,7 +77,7 @@ def process_conv_rollout(rollout,mem_size=4):
         input = rollout.states[i-mem_size:i]
         batch_si.append(np.squeeze(np.array(input).swapaxes(0,3)))
 
-    batch_si = np.asarray(batch_si)
+    batch_si = np.asarray(batch_si)[:,:,::-1,:] if reverse else np.asarray(batch_si)
     batch_a = np.asarray(rollout.actions[mem_size:])
     return IRL_Batch(batch_si, batch_a,None)
 

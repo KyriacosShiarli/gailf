@@ -63,7 +63,7 @@ class DemonstrationManager(object):
             print "STORED AVERAGE REWARDS",stored_avg
             if reward_avg<np.amax(stored_avg):
                 self.trajectories[np.argmax(stored_avg)] = rollout
-        if self.counter > 100:
+        if self.counter > 100 and self.counter%10==0:
             self.save()
     def save(self):
         with open(self.base_filename + ".pkl", 'wb') as handle:
