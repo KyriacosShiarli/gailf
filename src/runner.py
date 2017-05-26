@@ -130,7 +130,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
                     else:
                         r_obs = last_state
 
-                    r_fetched = self.reward_f.reward([r_obs],[action])
+                    r_fetched = self.reward_f.reward([r_obs],[action*(1-self.same_colours)])
                     #reward = r_fetched[0][0,0] #-r_fetched[0][0,1] #if reward is binary class.
                     reward = r_fetched[0][0]
                     irl_rewards.append(reward)

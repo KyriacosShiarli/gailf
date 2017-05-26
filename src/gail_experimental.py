@@ -35,7 +35,7 @@ should be computed.
         self.rollout_history = deque([],maxlen=cfg["rollout_history"] if cfg.has_key('rollout_history') else 20000)
         self.pretrain_steps =cfg["pretrain_steps"] if cfg.has_key("pretrain_steps") else 100
         self.pretrain = False if self.pretrain_steps < 2 else True
-        self.plr_init = float(cfg["plr_init"] if cfg.has_key('plt_init') else 4e-5)
+        self.plr_init = float(cfg["plr_init"] if cfg.has_key('plr_init') else 4e-5)
         self.plr_max = float(cfg["plr_max"] if cfg.has_key('plr_max') else 4e-5)
         self.plr_inc = cfg["plr_inc"] if cfg.has_key('plr_inc') else 1.0004
         self.rlr = float(cfg["rlr"] if cfg.has_key('rlr') else 1e-4)
@@ -277,7 +277,7 @@ rollout structure.
 
         if self.enemy_learning:
             idx2 = np.random.randint(0, len(self.rollout_history))
-            data_e = self.rollout_history[idx]
+            data_e = self.rollout_history[idx2]
         else:
             data_e = self.data_manager.get(number=1., length=len(r_rollout.states))[0]
 
