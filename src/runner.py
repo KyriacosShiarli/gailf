@@ -201,8 +201,8 @@ def recording_runner(env, policy, num_local_steps, summary_writer, render):
     """
     A thread runner that records the best and worse trajectories of the thread
     """
-    recorder_failure = DemonstrationManager("../data/pong/demonstrations")
-    recorder = DemonstrationManager("../data/pong/demonstrations_failure")
+    recorder = DemonstrationManager("../data/pong/demonstrations")
+    recorder_failure = DemonstrationManager("../data/pong/demonstrations_failure")
     last_state = env.reset()
     last_features = policy.get_initial_features()
     length = 0
